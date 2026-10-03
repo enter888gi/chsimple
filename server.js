@@ -59,6 +59,8 @@ app.get('/', (req, res) => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
   <title>SimpleChatee - Anonymous Chat</title>
+  <!-- 暗号化用ライブラリ CryptoJS (AES暗号化) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
   <style>
     :root {
       --bg-color: #0f172a;
@@ -75,16 +77,19 @@ app.get('/', (req, res) => {
     
     /* 3段ヘッダーレイアウト */
     .header { padding: 10px 14px; border-bottom: 1px solid var(--border-color); background: #111827; display: flex; flex-direction: column; gap: 4px; }
-    .header-row { display: flex; justify-content: space-between; align-items: center; width: 100%; }
+    .header-row { display: flex; justify-content: space-between; align-items: center; width: 100%; white-space: nowrap; }
     
     .header .room-name { color: var(--accent-color); font-weight: bold; cursor: pointer; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; font-size: 1.05rem; }
-    .header-sub-info { font-size: 0.75rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
-    .header-copy-btn { background: #334155; color: #f8fafc; border: none; padding: 2px 5px; border-radius: 4px; cursor: pointer; font-size: 0.65rem; line-height: 1.2; }
+    .header-sub-info { font-size: 0.75rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .header-copy-btn { background: #334155; color: #f8fafc; border: none; padding: 2px 5px; border-radius: 4px; cursor: pointer; font-size: 0.65rem; line-height: 1.2; flex-shrink: 0; }
     .header-copy-btn:hover { background: #475569; }
 
-    .version-tag { font-size: 0.65rem; color: #64748b; }
-    .btn-leave { background: #ef4444; color: white; border: none; padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 0.7rem; font-weight: bold; }
+    .version-tag { font-size: 0.65rem; color: #64748b; flex-shrink: 0; }
+    
+    /* 退室ボタン用スタイル */
+    .btn-leave { background: #ef4444; color: white; border: none; padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: bold; width: 100%; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .btn-leave:hover { background: #dc2626; }
+    .btn-leave .sub-text { font-size: 0.62rem; font-weight: normal; opacity: 0.9; margin-left: 4px; display: inline-block; }
 
     .view { display: none; padding: 20px; flex-direction: column; height: 100%; overflow-y: auto; }
     .view.active { display: flex; }
@@ -142,20 +147,22 @@ app.get('/', (req, res) => {
     <!-- 1段目: 左詰め 部屋名 / 右詰め Ver.表記 -->
     <div class="header-row">
       <span class="room-name" id="header-room-name" onclick="goHome()">SimpleChatee</span>
-      <span class="version-tag">Ver. 1.1.0</span>
+      <span class="version-tag">Ver. 1.1.1</span>
     </div>
     <!-- 2段目: 左詰め 部屋ID・コピー / 右詰め 人数 -->
     <div class="header-row">
       <div id="header-room-id-container" class="header-sub-info" style="display: none;">
-        <span>部屋ID:<span id="display-room-id"></span></span>
+        <span>部屋ID: <span id="display-room-id"></span></span>
         <button class="header-copy-btn" onclick="copyRoomLink()">🔗コピー</button>
       </div>
       <span id="member-count" style="font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; margin-left: auto;"></span>
     </div>
-    <!-- 3段目: 右詰め 退室ボタン -->
+    <!-- 3段目: 退室ボタン -->
     <div class="header-row">
-      <div id="room-action-container" style="display: none; width: 100%; text-align: right;">
-        <button class="btn-leave" onclick="leaveRoom()">退室する</button>
+      <div id="room-action-container" style="display: none; width: 100%; margin-top: 2px;">
+        <button class="btn-leave" onclick="leaveRoom()">
+          退室する<span class="sub-text">(同じブラウザならトップ画面からPWなしで再入室も可能)</span>
+        </button>
       </div>
     </div>
   </div>
@@ -223,12 +230,35 @@ app.get('/', (req, res) => {
 <script>
   const socket = io();
   let currentRoomId = '';
+  let currentPassword = ''; // 暗号化・解読用キー
   let myNickname = '';
   let userSessionId = '';
   let selectedFile = null;
   
   let typingTimeout = null;
   let isTyping = false;
+
+  // --- 暗号化・解読関数（CryptoJS / AES） ---
+  function encryptText(plainText, key) {
+    if (!plainText) return '';
+    try {
+      return CryptoJS.AES.encrypt(plainText, key).toString();
+    } catch (e) {
+      console.error('暗号化エラー:', e);
+      return plainText;
+    }
+  }
+
+  function decryptText(cipherText, key) {
+    if (!cipherText) return '';
+    try {
+      const bytes = CryptoJS.AES.decrypt(cipherText, key);
+      const originalText = bytes.toString(CryptoJS.enc.Utf8);
+      return originalText || '(復号エラー: パスワードが一致しません)';
+    } catch (e) {
+      return '(暗号化メッセージの読み込みに失敗しました)';
+    }
+  }
 
   function getOrCreateSessionId() {
     let sid = localStorage.getItem('userSessionId');
@@ -292,7 +322,6 @@ app.get('/', (req, res) => {
     const urlParams = new URLSearchParams(window.location.search);
     const urlRoomId = urlParams.get('room');
     
-    // URLに部屋IDがある場合、または直接アクセス時
     if (urlRoomId) {
       const savedRooms = getSavedRooms();
       if (savedRooms[urlRoomId]) {
@@ -306,6 +335,7 @@ app.get('/', (req, res) => {
 
   function quickJoin(roomId, password, nickname) {
     currentRoomId = roomId;
+    currentPassword = password;
     myNickname = nickname || 'ゲスト';
     socket.emit('join_room', { roomId, password, nickname: myNickname, sessionId: userSessionId }, function(res) {
       if (res.success) {
@@ -357,6 +387,7 @@ app.get('/', (req, res) => {
 
     if (!password) return alert('パスワードを設定してください');
 
+    currentPassword = password;
     socket.emit('create_room', { name: name, password: password, nickname: myNickname, sessionId: userSessionId }, function(res) {
       if (res.success) {
         currentRoomId = res.roomId;
@@ -376,6 +407,7 @@ app.get('/', (req, res) => {
     myNickname = document.getElementById('join-nickname').value || 'ゲスト';
     const password = document.getElementById('join-password').value;
 
+    currentPassword = password;
     socket.emit('join_room', { roomId: currentRoomId, password: password, nickname: myNickname, sessionId: userSessionId }, function(res) {
       if (res.success) {
         saveRoomToStorage(currentRoomId, res.roomName, myNickname, password);
@@ -481,9 +513,12 @@ app.get('/', (req, res) => {
       }
     }
 
+    // ★ ブラウザ側で部屋のパスワードを使って暗号化 ★
+    const encryptedText = text ? encryptText(text, currentPassword) : '';
+
     socket.emit('send_message', {
       roomId: currentRoomId,
-      text: text,
+      text: encryptedText,
       image: imageUrl
     });
 
@@ -507,13 +542,16 @@ app.get('/', (req, res) => {
     div.className = 'message ' + colorClass;
     div.id = 'msg-' + msg.id;
 
+    // ★ 受信時に部屋のパスワードで復号（解読） ★
+    const plainText = msg.text ? decryptText(msg.text, currentPassword) : '';
+
     let html = '';
     if (isSelf) {
       html += '<span class="del-btn" onclick="deleteMessage(\\\'' + msg.id + '\\\')">✕ 削除</span>';
     }
     
     html += '<div class="sender">' + escapeHtml(msg.senderName) + '</div>';
-    if (msg.text) html += '<div class="text-content">' + escapeHtml(msg.text) + '</div>';
+    if (plainText) html += '<div class="text-content">' + escapeHtml(plainText) + '</div>';
     if (msg.image) {
       html += '<img src="' + msg.image + '" class="chat-img" onclick="openImageInNewTab(\\\'' + msg.image + '\\\')" oncontextmenu="return false;" onerror="this.alt=\\\'(送信から1時間経過のため画像は削除されました)\\\'; this.style.display=\\\'none\\\';">';
     }
@@ -612,7 +650,7 @@ io.on('connection', (socket) => {
 
     const existingMember = room.members.find(m => m.sessionId === sessionId);
 
-    // 満員チェック（既にいるメンバーでなければ拒否）
+    // 満員チェック
     if (!existingMember && room.members.length >= 3) {
       return callback({ success: false, error: '部屋が満員です（最大3名）' });
     }
@@ -679,7 +717,7 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('display_typing', { isTyping: false });
   });
 
-  // メッセージ送信
+  // メッセージ送信（テキストは暗号文のまま配られます）
   socket.on('send_message', ({ roomId, text, image }) => {
     const room = rooms[roomId];
     if (!room) return;
@@ -691,7 +729,7 @@ io.on('connection', (socket) => {
       senderId: socket.id,
       senderName: sender ? sender.nickname : '匿名',
       colorIndex: sender ? sender.colorIndex : 0,
-      text,
+      text, // ※ブラウザ側で暗号化された暗号文
       image
     };
 
@@ -711,13 +749,12 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 切断処理（リロード時は一時切断扱い、明確な退室メッセージは出さない）
+  // 切断処理
   socket.on('disconnect', () => {
     for (const roomId in rooms) {
       const room = rooms[roomId];
       const member = room.members.find(m => m.id === socket.id);
       if (member) {
-        // Socket IDを一時的にクリア（再接続待ち状態）
         member.id = null;
         break;
       }
