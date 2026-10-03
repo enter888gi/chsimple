@@ -1,589 +1,208 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server, { maxHttpBufferSize: 1e7 });
-
-// --- 画像の保存先設定 (uploads フォルダ) ---
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir);
-}
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    const uniqueName = Date.now() + '-' + Math.round(Math.random() * 1E9) + ext;
-    cb(null, uniqueName);
-  }
-});
-const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB上限
-
-// 静的ファイルとしてアップロード画像を公開
-app.use('/uploads', express.static(uploadDir));
-
-// --- 部屋データ管理 ---
-const rooms = {};
-
-// --- 画像アップロード API ---
-app.post('/api/upload', upload.single('image'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'ファイルがありません' });
-
-  const imageUrl = '/uploads/' + req.file.filename;
-  const filePath = req.file.path;
-
-  // 1時間後に自動削除
-  setTimeout(() => {
-    fs.unlink(filePath, (err) => {
-      if (err) console.error('画像自動削除エラー:', err);
-      else console.log('1時間経過のため画像を自動削除しました:', req.file.filename);
-    });
-  }, 60 * 60 * 1000);
-
-  res.json({ imageUrl });
-});
-
-// --- 単一ファイルWebページ配信 ---
-app.get('/', (req, res) => {
-  res.send(`
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SimpleChatee - Anonymous Chat</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>heya — T</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg-color: #0f172a;
-      --card-bg: #1e293b;
-      --accent-color: #38bdf8;
-      --text-color: #f8fafc;
-      --text-muted: #94a3b8;
-      --border-color: #334155;
+      --bg: #efece6; --surface: #f7f4ee; --sunken: #e7e2d8; --fg: #161513;
+      --muted: #6b6760; --subtle: #8a857c; --border: #d8d2c6; --accent: #21564a;
+      --accent-fg: #f4f1ea; --mine: #1c1b19; --mine-fg: #f6f3ec; --theirs: #e4dfd6;
+      --danger: #8f3d32;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background-color: var(--bg-color); color: var(--text-color); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 10px; }
-    
-    .container { width: 100%; max-width: 500px; background: var(--card-bg); border-radius: 16px; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; height: 90vh; position: relative; }
-    .header { padding: 10px 14px; border-bottom: 1px solid var(--border-color); background: #111827; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-    .header-left { display: flex; align-items: center; gap: 8px; overflow: hidden; }
-    .header .room-name { color: var(--accent-color); font-weight: bold; cursor: pointer; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
-    
-    .header-sub-info { font-size: 0.7rem; color: var(--text-muted); display: flex; align-items: center; gap: 4px; }
-    .header-copy-btn { background: #334155; color: #f8fafc; border: none; padding: 2px 4px; border-radius: 4px; cursor: pointer; font-size: 0.65rem; line-height: 1; }
-    .header-copy-btn:hover { background: #475569; }
-
-    .header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
-    .version-tag { font-size: 0.65rem; color: #64748b; }
-    .room-notice { font-size: 0.6rem; color: #64748b; text-align: right; }
-
-    .view { display: none; padding: 20px; flex-direction: column; height: 100%; overflow-y: auto; }
-    .view.active { display: flex; }
-
-    label { font-size: 0.85rem; color: var(--text-muted); margin-top: 12px; display: block; }
-    input, textarea { width: 100%; padding: 12px; margin-top: 6px; border-radius: 8px; border: 1px solid var(--border-color); background: #0f172a; color: white; outline: none; }
-    input:focus, textarea:focus { border-color: var(--accent-color); }
-    textarea { resize: none; height: 44px; font-size: 0.9rem; line-height: 1.4; }
-    
-    button { width: 100%; padding: 12px; margin-top: 18px; border-radius: 8px; border: none; background: var(--accent-color); color: #0f172a; font-weight: bold; cursor: pointer; }
-    .btn-secondary { background: #475569; color: white; }
-
-    #chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-bottom: 10px; }
-    
-    /* 吹き出しのスタイル */
-    .message { display: flex; flex-direction: column; width: fit-content; max-width: 80%; padding: 8px 12px; border-radius: 12px; position: relative; word-break: break-word; align-self: flex-start; font-size: 0.85rem; line-height: 1.4; }
-    
-    /* 自分（青） */
-    .message.self { align-self: flex-end; background: #0284c7; color: white; }
-    .message.self .sender { color: #e0f2fe; }
-
-    /* 他ユーザー（1つ目のデフォルト・グレー） */
-    .message.user-color-0 { background: #334155; color: #f8fafc; }
-    
-    /* 他ユーザー（2つ目・薄いグリーン） */
-    .message.user-color-1 { background: #1e3a29; color: #f8fafc; border: 1px solid #2e5d40; }
-
-    .message .sender { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px; padding-right: 20px; font-weight: bold; }
-    .message .text-content { white-space: pre-wrap; }
-    .message .del-btn { position: absolute; top: 4px; right: 8px; cursor: pointer; color: #fca5a5; font-size: 0.75rem; opacity: 0; transition: 0.2s; }
-    .message:hover .del-btn { opacity: 1; }
-
-    /* 入退室システム通知メッセージ */
-    .system-notification { text-align: center; font-size: 0.75rem; color: var(--text-muted); margin: 4px 0; align-self: center; }
-
-    .chat-img { max-width: 100%; max-height: 200px; border-radius: 8px; margin-top: 6px; cursor: pointer; user-select: none; -webkit-user-drag: none; }
-    
-    .input-area { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border-color); }
-    .input-row { display: flex; gap: 8px; align-items: flex-end; }
-    .file-btn { background: #475569; color: white; padding: 12px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; margin: 0; width: auto; height: 44px; display: flex; align-items: center; justify-content: center; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--fg);
+      font-family: "Zen Kaku Gothic New", "Hiragino Sans", sans-serif; }
+    button { font: inherit; cursor: pointer; }
+    input, textarea { font: inherit; }
+    .shell { min-height: 100dvh; display: flex; justify-content: center; }
+    .phone { width: 100%; max-width: 28rem; min-height: 100dvh; background: var(--surface);
+      border-left: 1px solid var(--border); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; }
+    header.bar { display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+      border-bottom: 1px solid var(--border); }
+    .mark { width: 28px; height: 28px; border: 1.5px solid var(--fg); border-radius: 8px;
+      display: grid; place-items: center; flex: none; }
+    .mark i { width: 8px; height: 8px; border: 1.5px solid var(--accent); border-radius: 99px; }
+    h1 { font-size: 15px; margin: 0; font-weight: 700; letter-spacing: -0.02em; }
+    p.sub { margin: 0; color: var(--muted); font-size: 12px; }
+    .grow { flex: 1; }
+    .iconbtn { width: 40px; height: 40px; border: 0; background: transparent; border-radius: 10px; color: var(--fg); }
+    .iconbtn:hover { background: var(--sunken); }
+    .hero { padding: 48px 24px 16px; }
+    .hero h2 { font-size: 32px; line-height: 1.2; margin: 0 0 12px; letter-spacing: -0.03em; font-weight: 700; }
+    .hero p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
+    form.stack { padding: 8px 24px 32px; display: flex; flex-direction: column; gap: 12px; }
+    label { font-size: 12px; font-weight: 500; color: var(--muted); }
+    input, textarea { width: 100%; border: 1px solid var(--border); background: var(--bg);
+      border-radius: 12px; padding: 12px 12px; color: var(--fg); outline: none; }
+    input:focus, textarea:focus { box-shadow: 0 0 0 2px var(--accent); }
+    .btn { height: 48px; border: 0; border-radius: 14px; background: var(--accent); color: var(--accent-fg);
+      font-weight: 500; }
+    .btn.ghost { background: transparent; color: var(--fg); border: 1px solid var(--border); }
+    .hint { font-size: 12px; color: var(--subtle); line-height: 1.5; }
+    .log { flex: 1; overflow: auto; padding: 16px 14px 8px; display: flex; flex-direction: column; gap: 8px; }
+    .bubble { max-width: 78%; padding: 10px 12px; border-radius: 18px; font-size: 14px; line-height: 1.5; }
+    .row { display: flex; flex-direction: column; }
+    .row.me { align-items: flex-end; }
+    .row.them { align-items: flex-start; }
+    .me .bubble { background: var(--mine); color: var(--mine-fg); border-bottom-right-radius: 6px; }
+    .them .bubble { background: var(--theirs); color: var(--fg); border-bottom-left-radius: 6px; }
+    .who { font-size: 11px; color: var(--subtle); margin: 0 4px 4px; }
+    .thumb { width: 168px; height: 112px; object-fit: cover; border-radius: 14px; display: block; cursor: zoom-in; background: var(--sunken); }
+    .composer { display: flex; gap: 8px; padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+      border-top: 1px solid var(--border); align-items: flex-end; }
+    .composer textarea { min-height: 44px; max-height: 120px; border-radius: 22px; padding: 10px 14px; resize: none; }
+    .send { width: 44px; height: 44px; border: 0; border-radius: 99px; background: var(--accent); color: var(--accent-fg); flex: none; }
+    .typing-indicator { font-size: 11px; color: var(--subtle); padding: 0 16px 6px; min-height: 18px; }
+    .pending { margin: 0 16px 8px; }
+    .pending img { width: 120px; height: 80px; object-fit: cover; border-radius: 12px; }
+    .banner { margin: 12px 16px 0; padding: 10px 12px; background: var(--sunken); border-radius: 12px; font-size: 12px; color: var(--muted); }
+    .lightbox { position: fixed; inset: 0; background: rgb(22 21 19 / 0.88); display: grid; place-items: center; z-index: 40; }
+    .lightbox img { max-width: 92vw; max-height: 88vh; border-radius: 8px; }
+    .err { color: var(--danger); font-size: 12px; }
+    .menu { position: absolute; right: 12px; top: 56px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; padding: 6px; min-width: 180px; box-shadow: 0 12px 32px rgb(22 21 19 / 0.08); }
+    .menu button { display: block; width: 100%; text-align: left; background: transparent; border: 0; padding: 10px 12px; border-radius: 10px; }
+    .menu button:hover { background: var(--sunken); }
+    .hidden { display: none !important; }
   </style>
 </head>
 <body>
-
-<div class="container">
-  <div class="header">
-    <div class="header-left">
-      <span class="room-name" id="header-room-name" onclick="goHome()">SimpleChatee</span>
-      <div id="header-room-id-container" class="header-sub-info" style="display: none;">
-        <span>部屋ID:<span id="display-room-id"></span></span>
-        <button class="header-copy-btn" onclick="copyRoomLink()">🔗コピー</button>
-      </div>
-    </div>
-    <div class="header-right">
-      <div class="version-tag">Ver. 1.0.1</div>
-      <span id="member-count" style="font-size: 0.8rem; color: var(--text-muted); white-space: nowrap;"></span>
-      <div id="room-persist-notice" class="room-notice" style="display: none;">※ブラウザを閉じても24時間は部屋は無くなりません</div>
-    </div>
+  <!-- heya exported source | room FBNH9F | 作成者パスワード admin の部屋からのみ書き出し -->
+  <div class="shell">
+    <div class="phone" id="app"></div>
   </div>
+  <script>
+    const META = { roomName: "T", code: "FBNH9F" };
+    const MEGA_RE = /https?:\/\/mega(?:\.co)?\.nz\/(?:file\/|folder\/|embed\/|#!)[^\s<>"']+/i;
+    const dbKey = "heya.export." + META.code;
+    const state = load();
+    const root = document.getElementById("app");
+    let pendingMega = null;
+    let menuOpen = false;
+    let lightUrl = null;
+    let isTyping = false;
+    let typingTimer = null;
 
-  <!-- メイン画面 -->
-  <div id="view-home" class="view active">
-    <h2 style="text-align:center; margin-bottom: 20px;">SimpleChatee</h2>
-    <button onclick="showView('view-create')">新しい部屋を作成</button>
-    <div style="text-align: center; margin: 15px 0; color: var(--text-muted);">- または -</div>
-    <input type="text" id="join-room-id" placeholder="部屋IDを入力">
-    <button class="btn-secondary" onclick="checkRoomJoin()">部屋に参加</button>
-  </div>
-
-  <!-- 部屋作成画面 -->
-  <div id="view-create" class="view">
-    <h3>部屋を作成</h3>
-    <label>部屋名</label>
-    <input type="text" id="create-room-name" placeholder="例: ひみつの部屋">
-    <label>共通パスワード（参加者用）</label>
-    <input type="password" id="create-password" placeholder="合言葉を入力">
-    <label>あなたのニックネーム</label>
-    <input type="text" id="create-nickname" placeholder="名無し">
-    <button onclick="createRoom()">作成して入室</button>
-    <button class="btn-secondary" style="margin-top: 10px;" onclick="goHome()">キャンセル</button>
-  </div>
-
-  <!-- 入室画面 -->
-  <div id="view-join" class="view">
-    <h3 id="join-target-room-title">部屋に入室</h3>
-    <label>あなたのニックネーム</label>
-    <input type="text" id="join-nickname" placeholder="名無し">
-    <label>パスワード</label>
-    <input type="password" id="join-password" placeholder="パスワードを入力">
-    <button onclick="joinRoom()">入室する</button>
-    <button class="btn-secondary" style="margin-top: 10px;" onclick="goHome()">トップに戻る（部屋作成 / 別の部屋へ）</button>
-  </div>
-
-  <!-- チャット画面 -->
-  <div id="view-chat" class="view">
-    <div id="chat-messages"></div>
-
-    <div class="input-area">
-      <div id="file-name-preview" style="font-size: 0.75rem; color: var(--accent-color); display: none;"></div>
-      <div class="input-row">
-        <label class="file-btn">
-          📷
-          <input type="file" id="file-input" accept="image/*" style="display:none;" onchange="onFileSelected(this)">
-        </label>
-        <textarea id="msg-input" placeholder="メッセージを入力..." onkeydown="onKeyDown(event)"></textarea>
-        <button style="margin-top:0; width:auto; padding: 0 16px; height: 44px;" onclick="sendMessage()">送信</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<script src="/socket.io/socket.io.js"></script>
-<script>
-  const socket = io();
-  let currentRoomId = '';
-  let myNickname = '';
-  let selectedFile = null;
-
-  window.onload = function() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const roomId = urlParams.get('room');
-    
-    const savedRoomId = sessionStorage.getItem('currentRoomId');
-    const savedNickname = sessionStorage.getItem('myNickname');
-    const savedPassword = sessionStorage.getItem('myPassword');
-
-    if (savedRoomId && savedRoomId === roomId) {
-      currentRoomId = savedRoomId;
-      myNickname = savedNickname || 'ゲスト';
-      socket.emit('join_room', { roomId: currentRoomId, password: savedPassword, nickname: myNickname }, function(res) {
-        if (res.success) {
-          setupChatView(res.roomName, res.messages);
-        } else {
-          clearSession();
-          initJoinView(roomId);
-        }
-      });
-    } else if (roomId) {
-      initJoinView(roomId);
+    function load() {
+      try { return JSON.parse(localStorage.getItem(dbKey)) || seed(); }
+      catch { return seed(); }
     }
-  };
-
-  function initJoinView(roomId) {
-    document.getElementById('join-room-id').value = roomId;
-    currentRoomId = roomId;
-
-    socket.emit('get_room_info', { roomId: roomId }, function(res) {
-      if (res.success && res.roomName) {
-        document.getElementById('join-target-room-title').innerText = '「' + res.roomName + '」に入室';
-      } else {
-        document.getElementById('join-target-room-title').innerText = '部屋に入室';
-      }
-      showView('view-join');
-    });
-  }
-
-  function showView(id) {
-    const views = document.querySelectorAll('.view');
-    views.forEach(function(v) { v.classList.remove('active'); });
-    document.getElementById(id).classList.add('active');
-  }
-
-  function goHome() {
-    clearSession();
-    window.history.pushState({}, '', window.location.pathname);
-    document.getElementById('header-room-name').innerText = 'SimpleChatee';
-    document.getElementById('header-room-id-container').style.display = 'none';
-    document.getElementById('member-count').innerText = '';
-    document.getElementById('room-persist-notice').style.display = 'none';
-    showView('view-home');
-  }
-
-  function clearSession() {
-    sessionStorage.removeItem('currentRoomId');
-    sessionStorage.removeItem('myNickname');
-    sessionStorage.removeItem('myPassword');
-  }
-
-  function createRoom() {
-    const name = document.getElementById('create-room-name').value || '無題の部屋';
-    const password = document.getElementById('create-password').value;
-    myNickname = document.getElementById('create-nickname').value || '部屋主';
-
-    if (!password) return alert('パスワードを設定してください');
-
-    socket.emit('create_room', { name: name, password: password, nickname: myNickname }, function(res) {
-      if (res.success) {
-        currentRoomId = res.roomId;
-        sessionStorage.setItem('currentRoomId', currentRoomId);
-        sessionStorage.setItem('myNickname', myNickname);
-        sessionStorage.setItem('myPassword', password);
-        setupChatView(name, []);
-      }
-    });
-  }
-
-  function checkRoomJoin() {
-    const roomId = document.getElementById('join-room-id').value.trim();
-    if (!roomId) return alert('部屋IDを入力してください');
-    initJoinView(roomId);
-  }
-
-  function joinRoom() {
-    myNickname = document.getElementById('join-nickname').value || 'ゲスト';
-    const password = document.getElementById('join-password').value;
-
-    socket.emit('join_room', { roomId: currentRoomId, password: password, nickname: myNickname }, function(res) {
-      if (res.success) {
-        sessionStorage.setItem('currentRoomId', currentRoomId);
-        sessionStorage.setItem('myNickname', myNickname);
-        sessionStorage.setItem('myPassword', password);
-        setupChatView(res.roomName, res.messages);
-      } else {
-        alert(res.error || '入室に失敗しました');
-      }
-    });
-  }
-
-  function setupChatView(roomName, messages) {
-    document.getElementById('header-room-name').innerText = roomName;
-    document.getElementById('display-room-id').innerText = currentRoomId;
-    document.getElementById('header-room-id-container').style.display = 'inline-flex';
-    document.getElementById('room-persist-notice').style.display = 'block';
-    window.history.pushState({}, '', '?room=' + currentRoomId);
-    showView('view-chat');
-
-    const container = document.getElementById('chat-messages');
-    container.innerHTML = '';
-    if (messages && messages.length > 0) {
-      messages.forEach(function(msg) {
-        if (msg.type === 'system') {
-          renderSystemNotification(msg.text);
-        } else {
-          renderSingleMessage(msg);
-        }
+    function seed() {
+      return { messages: [], nick: "書き出し" };
+    }
+    function save() { localStorage.setItem(dbKey, JSON.stringify(state)); }
+    function escape(s) {
+      return String(s).replace(/[&<>"']/g, function (c) {
+        if (c === "&") return String.fromCharCode(38) + "amp;";
+        if (c === "<") return String.fromCharCode(38) + "lt;";
+        if (c === ">") return String.fromCharCode(38) + "gt;";
+        if (c === '"') return String.fromCharCode(38) + "quot;";
+        return String.fromCharCode(38) + "#39;";
       });
     }
-  }
-
-  function copyRoomLink() {
-    const url = window.location.origin + '?room=' + currentRoomId;
-    navigator.clipboard.writeText(url).then(function() {
-      alert('部屋の招待URLをコピーしました！\\nパスワードと一緒に友達に共有してください。');
-    });
-  }
-
-  function onFileSelected(input) {
-    if (input.files && input.files[0]) {
-      selectedFile = input.files[0];
-      const preview = document.getElementById('file-name-preview');
-      preview.innerText = '選択中: ' + selectedFile.name;
-      preview.style.display = 'block';
-    }
-  }
-
-  function onKeyDown(e) {
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    if (!isMobile && e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  }
-
-  async function sendMessage() {
-    const input = document.getElementById('msg-input');
-    const text = input.value.trim();
-    let imageUrl = null;
-
-    if (!text && !selectedFile) return;
-
-    if (selectedFile) {
-      const formData = new FormData();
-      formData.append('image', selectedFile);
-      try {
-        const res = await fetch('/api/upload', { method: 'POST', body: formData });
-        const data = await res.json();
-        imageUrl = data.imageUrl;
-      } catch (e) {
-        alert('画像のアップロードに失敗しました');
+    function render() {
+      if (lightUrl) {
+        root.innerHTML = '<div class="lightbox" id="lb"><img alt="" src="' + lightUrl + '"></div>';
+        document.getElementById("lb").onclick = () => { lightUrl = null; render(); };
         return;
       }
+      const msgs = state.messages.map((m) => {
+        if (m.kind === "mega") {
+          return '<div class="row me"><div class="bubble" style="padding:6px">'
+            + (m.dataUrl
+              ? '<img class="thumb" data-full="' + escape(m.dataUrl) + '" src="' + escape(m.dataUrl) + '" alt="">'
+              : '<div class="thumb"></div>')
+            + '</div><button class="iconbtn" data-del="' + m.id + '" style="width:28px;height:28px;opacity:.5">×</button></div>';
+        }
+        return '<div class="row me"><div class="bubble">' + escape(m.body) + '</div>'
+          + '<button class="iconbtn" data-del="' + m.id + '" style="width:28px;height:28px;opacity:.5">×</button></div>';
+      }).join("");
+      root.innerHTML = `
+        <header class="bar">
+          <div class="mark"><i></i></div>
+          <div class="grow"><h1>${escape(META.roomName)}</h1><p class="sub">書き出したHTMLソース · ${escape(META.code)}</p></div>
+          <button class="iconbtn" id="menuBtn" aria-label="メニュー">⋯</button>
+        </header>
+        <div class="banner">このファイルは設定画面から書き出した単一HTMLです。見た目の保管用で、MEGA画像はリンク先へは飛びません。会話の同期は公開中のheya本体で行ってください。</div>
+        ${menuOpen ? '<div class="menu"><button id="wipe">やりとりを消す</button><button id="src">ソースを表示</button></div>' : ''}
+        <div class="log" id="log">${msgs || '<p class="sub" style="margin:auto;padding:32px 0">まだ言葉はありません</p>'}</div>
+        <div class="typing-indicator" id="typing">${isTyping ? escape(state.nick) + ' が入力中...' : ''}</div>
+        ${pendingMega ? '<div class="pending"><img alt="" src="' + pendingMega.dataUrl + '"><div class="hint">送信前のサムネイル</div></div>' : ''}
+        <form class="composer" id="composer">
+          <textarea id="text" rows="1" placeholder="メッセージ、または MEGA リンク"></textarea>
+          <button class="send" type="submit">送信</button>
+        </form>
+      `;
+      const log = document.getElementById("log");
+      log.scrollTop = log.scrollHeight;
+      document.getElementById("menuBtn").onclick = () => { menuOpen = !menuOpen; render(); };
+      const wipe = document.getElementById("wipe");
+      if (wipe) wipe.onclick = () => { state.messages = []; save(); menuOpen = false; render(); };
+      const src = document.getElementById("src");
+      if (src) src.onclick = () => { alert("このページ自体が書き出したHTMLソースです。ブラウザの保存で保管できます。"); };
+      log.querySelectorAll("[data-full]").forEach((img) => {
+        img.addEventListener("click", () => { lightUrl = img.getAttribute("data-full"); render(); });
+      });
+      log.querySelectorAll("[data-del]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          state.messages = state.messages.filter((m) => m.id !== btn.getAttribute("data-del"));
+          save(); render();
+        });
+      });
+      const form = document.getElementById("composer");
+      const ta = document.getElementById("text");
+      ta.addEventListener("input", () => {
+        const found = ta.value.match(MEGA_RE);
+        if (found) {
+          ta.value = ta.value.replace(found[0], "").trim();
+          pendingMega = { dataUrl: placeholderThumb(), url: found[0] };
+          render();
+          document.getElementById("text").focus();
+          return;
+        }
+
+        // 入力中表示のコントロール
+        if (ta.value.trim().length > 0) {
+          if (!isTyping) {
+            isTyping = true;
+            document.getElementById("typing").innerText = state.nick + " が入力中...";
+          }
+          clearTimeout(typingTimer);
+          typingTimer = setTimeout(() => {
+            isTyping = false;
+            const el = document.getElementById("typing");
+            if (el) el.innerText = "";
+          }, 2000);
+        } else {
+          isTyping = false;
+          const el = document.getElementById("typing");
+          if (el) el.innerText = "";
+        }
+      });
+      form.onsubmit = (e) => {
+        e.preventDefault();
+        const body = ta.value.trim();
+        isTyping = false;
+        clearTimeout(typingTimer);
+        if (pendingMega) {
+          state.messages.push({ id: String(Date.now()), kind: "mega", dataUrl: pendingMega.dataUrl });
+          pendingMega = null;
+        }
+        if (body) state.messages.push({ id: String(Date.now()+1), kind: "text", body });
+        save(); render();
+      };
     }
-
-    socket.emit('send_message', {
-      roomId: currentRoomId,
-      text: text,
-      image: imageUrl
-    });
-
-    input.value = '';
-    selectedFile = null;
-    document.getElementById('file-input').value = '';
-    document.getElementById('file-name-preview').style.display = 'none';
-  }
-
-  function deleteMessage(msgId) {
-    socket.emit('delete_message', { roomId: currentRoomId, msgId: msgId });
-  }
-
-  function renderSingleMessage(msg) {
-    const container = document.getElementById('chat-messages');
-    const div = document.createElement('div');
-    
-    const isSelf = (msg.senderId === socket.id);
-    const colorClass = isSelf ? 'self' : ('user-color-' + (msg.colorIndex || 0));
-    
-    div.className = 'message ' + colorClass;
-    div.id = 'msg-' + msg.id;
-
-    let html = '';
-    if (isSelf) {
-      html += '<span class="del-btn" onclick="deleteMessage(\\\'' + msg.id + '\\\')">✕ 削除</span>';
+    function placeholderThumb() {
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="336" height="224"><rect fill="#e7e2d8" width="336" height="224" rx="16"/><rect fill="#21564a" x="148" y="92" width="40" height="28" rx="4" opacity=".35"/><circle fill="#21564a" cx="160" cy="102" r="6" opacity=".5"/></svg>';
+      return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
     }
-    
-    html += '<div class="sender">' + escapeHtml(msg.senderName) + '</div>';
-    if (msg.text) html += '<div class="text-content">' + escapeHtml(msg.text) + '</div>';
-    if (msg.image) {
-      html += '<img src="' + msg.image + '" class="chat-img" onclick="openImageInNewTab(\\\'' + msg.image + '\\\')" oncontextmenu="return false;" onerror="this.alt=\\\'(送信から1時間経過のため画像は削除されました)\\\'; this.style.display=\\\'none\\\';">';
-    }
-
-    div.innerHTML = html;
-    container.appendChild(div);
-    container.scrollTop = container.scrollHeight;
-  }
-
-  function renderSystemNotification(text) {
-    const container = document.getElementById('chat-messages');
-    const div = document.createElement('div');
-    div.className = 'system-notification';
-    div.innerText = text;
-    container.appendChild(div);
-    container.scrollTop = container.scrollHeight;
-  }
-
-  socket.on('receive_message', function(msg) {
-    if (msg.type === 'system') {
-      renderSystemNotification(msg.text);
-    } else {
-      renderSingleMessage(msg);
-    }
-  });
-
-  socket.on('message_deleted', function(data) {
-    const el = document.getElementById('msg-' + data.msgId);
-    if (el) el.remove();
-  });
-
-  socket.on('update_members', function(data) {
-    document.getElementById('member-count').innerText = '(' + data.count + '/3人)';
-  });
-
-  function openImageInNewTab(src) {
-    window.open(src, '_blank');
-  }
-
-  function escapeHtml(str) {
-    return str.replace(/[&<>"']/g, function(m) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
-    });
-  }
-</script>
+    render();
+  </script>
 </body>
 </html>
-  `);
-});
-
-// --- Socket.io ---
-io.on('connection', (socket) => {
-  socket.on('get_room_info', ({ roomId }, callback) => {
-    const room = rooms[roomId];
-    if (room) {
-      callback({ success: true, roomName: room.name });
-    } else {
-      callback({ success: false });
-    }
-  });
-
-  // 部屋作成
-  socket.on('create_room', ({ name, password, nickname }, callback) => {
-    const roomId = Math.random().toString(36).substring(2, 8);
-    
-    rooms[roomId] = {
-      name,
-      password,
-      members: [{ id: socket.id, nickname, colorIndex: 0 }],
-      messages: []
-    };
-
-    // 24時間（86,400,000ミリ秒）後に部屋を完全削除
-    setTimeout(() => {
-      if (rooms[roomId]) {
-        delete rooms[roomId];
-        console.log(`部屋 ${roomId} を24時間経過のため自動削除しました`);
-      }
-    }, 24 * 60 * 60 * 1000);
-
-    socket.join(roomId);
-    callback({ success: true, roomId, messages: [] });
-    io.to(roomId).emit('update_members', { count: rooms[roomId].members.length });
-  });
-
-  // 部屋入室
-  socket.on('join_room', ({ roomId, password, nickname }, callback) => {
-    const room = rooms[roomId];
-    if (!room) return callback({ success: false, error: '部屋が存在しません（または消去されました）' });
-
-    // パスワードチェック
-    if (room.password && password !== room.password) {
-      return callback({ success: false, error: 'パスワードが正しくありません' });
-    }
-
-    const existingMember = room.members.find(m => m.id === socket.id);
-
-    // 既に3名（上限）に達しており、かつ自分が既存メンバーでない場合はブロック
-    if (!existingMember && room.members.length >= 3) {
-      return callback({ success: false, error: '部屋が満員です（最大3名）' });
-    }
-
-    let isNewJoin = false;
-
-    // 新規参加の場合はメンバーリストに追加
-    if (!existingMember) {
-      const colorIndex = room.members.length > 1 ? 1 : 0;
-      room.members.push({ id: socket.id, nickname, colorIndex });
-      isNewJoin = true;
-    } else {
-      // 再接続（リロード等）の場合は名前を更新
-      existingMember.nickname = nickname;
-    }
-
-    socket.join(roomId);
-
-    // 新規参加の場合のみ「◯◯が入室しました」というシステムメッセージを部屋に送信
-    if (isNewJoin) {
-      const systemMsg = {
-        type: 'system',
-        text: `${nickname} が入室しました`
-      };
-      room.messages.push(systemMsg);
-      io.to(roomId).emit('receive_message', systemMsg);
-    }
-
-    callback({ success: true, roomName: room.name, messages: room.messages });
-    io.to(roomId).emit('update_members', { count: room.members.length });
-  });
-
-  // メッセージ送信
-  socket.on('send_message', ({ roomId, text, image }) => {
-    const room = rooms[roomId];
-    if (!room) return;
-    const sender = room.members.find(m => m.id === socket.id);
-
-    const messageData = {
-      type: 'user',
-      id: Math.random().toString(36).substring(2, 10),
-      senderId: socket.id,
-      senderName: sender ? sender.nickname : '匿名',
-      colorIndex: sender ? sender.colorIndex : 0,
-      text,
-      image
-    };
-
-    room.messages.push(messageData);
-    io.to(roomId).emit('receive_message', messageData);
-  });
-
-  // メッセージ削除処理（送信本人のみ許可）
-  socket.on('delete_message', ({ roomId, msgId }) => {
-    const room = rooms[roomId];
-    if (room) {
-      const targetMsg = room.messages.find(m => m.id === msgId);
-      if (targetMsg && targetMsg.senderId === socket.id) {
-        room.messages = room.messages.filter(m => m.id !== msgId);
-        io.to(roomId).emit('message_deleted', { msgId });
-      }
-    }
-  });
-
-  // 接続切断
-  socket.on('disconnect', () => {
-    for (const roomId in rooms) {
-      const room = rooms[roomId];
-      const index = room.members.findIndex(m => m.id === socket.id);
-      if (index !== -1) {
-        const leavingUser = room.members[index];
-        room.members.splice(index, 1);
-        
-        // 退室通知を送信
-        const systemMsg = {
-          type: 'system',
-          text: `${leavingUser.nickname} が退室しました`
-        };
-        room.messages.push(systemMsg);
-        io.to(roomId).emit('receive_message', systemMsg);
-        io.to(roomId).emit('update_members', { count: room.members.length });
-        break;
-      }
-    }
-  });
-});
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
