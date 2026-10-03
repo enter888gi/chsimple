@@ -70,14 +70,18 @@ app.get('/', (req, res) => {
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body { background-color: var(--bg-color); color: var(--text-color); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 10px; }
     
-    .container { width: 100%; max-width: 500px; background: var(--card-bg); border-radius: 16px; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; height: 90vh; }
-    .header { padding: 12px 16px; border-bottom: 1px solid var(--border-color); background: #111827; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .container { width: 100%; max-width: 500px; background: var(--card-bg); border-radius: 16px; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; height: 90vh; position: relative; }
+    .header { padding: 10px 14px; border-bottom: 1px solid var(--border-color); background: #111827; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
     .header-left { display: flex; align-items: center; gap: 8px; overflow: hidden; }
     .header .room-name { color: var(--accent-color); font-weight: bold; cursor: pointer; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
     
-    .header-sub-info { font-size: 0.7rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
-    .header-copy-btn { background: #334155; color: #f8fafc; border: none; padding: 3px 6px; border-radius: 4px; cursor: pointer; font-size: 0.7rem; }
+    .header-sub-info { font-size: 0.7rem; color: var(--text-muted); display: flex; align-items: center; gap: 4px; }
+    .header-copy-btn { background: #334155; color: #f8fafc; border: none; padding: 2px 4px; border-radius: 4px; cursor: pointer; font-size: 0.65rem; line-height: 1; }
     .header-copy-btn:hover { background: #475569; }
+
+    .header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+    .version-tag { font-size: 0.65rem; color: #64748b; }
+    .room-notice { font-size: 0.6rem; color: #64748b; text-align: right; }
 
     .view { display: none; padding: 20px; flex-direction: column; height: 100%; overflow-y: auto; }
     .view.active { display: flex; }
@@ -110,6 +114,9 @@ app.get('/', (req, res) => {
     .message .del-btn { position: absolute; top: 4px; right: 8px; cursor: pointer; color: #fca5a5; font-size: 0.75rem; opacity: 0; transition: 0.2s; }
     .message:hover .del-btn { opacity: 1; }
 
+    /* 入退室システム通知メッセージ */
+    .system-notification { text-align: center; font-size: 0.75rem; color: var(--text-muted); margin: 4px 0; align-self: center; }
+
     .chat-img { max-width: 100%; max-height: 200px; border-radius: 8px; margin-top: 6px; cursor: pointer; user-select: none; -webkit-user-drag: none; }
     
     .input-area { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border-color); }
@@ -124,11 +131,15 @@ app.get('/', (req, res) => {
     <div class="header-left">
       <span class="room-name" id="header-room-name" onclick="goHome()">SimpleChatee</span>
       <div id="header-room-id-container" class="header-sub-info" style="display: none;">
-        <span>ID:<span id="display-room-id"></span></span>
+        <span>部屋ID:<span id="display-room-id"></span></span>
         <button class="header-copy-btn" onclick="copyRoomLink()">🔗コピー</button>
       </div>
     </div>
-    <span id="member-count" style="font-size: 0.8rem; color: var(--text-muted); white-space: nowrap;"></span>
+    <div class="header-right">
+      <div class="version-tag">Ver. 1.0.1</div>
+      <span id="member-count" style="font-size: 0.8rem; color: var(--text-muted); white-space: nowrap;"></span>
+      <div id="room-persist-notice" class="room-notice" style="display: none;">※ブラウザを閉じても24時間は部屋は無くなりません</div>
+    </div>
   </div>
 
   <!-- メイン画面 -->
@@ -239,6 +250,7 @@ app.get('/', (req, res) => {
     document.getElementById('header-room-name').innerText = 'SimpleChatee';
     document.getElementById('header-room-id-container').style.display = 'none';
     document.getElementById('member-count').innerText = '';
+    document.getElementById('room-persist-notice').style.display = 'none';
     showView('view-home');
   }
 
@@ -292,6 +304,7 @@ app.get('/', (req, res) => {
     document.getElementById('header-room-name').innerText = roomName;
     document.getElementById('display-room-id').innerText = currentRoomId;
     document.getElementById('header-room-id-container').style.display = 'inline-flex';
+    document.getElementById('room-persist-notice').style.display = 'block';
     window.history.pushState({}, '', '?room=' + currentRoomId);
     showView('view-chat');
 
@@ -299,7 +312,11 @@ app.get('/', (req, res) => {
     container.innerHTML = '';
     if (messages && messages.length > 0) {
       messages.forEach(function(msg) {
-        renderSingleMessage(msg);
+        if (msg.type === 'system') {
+          renderSystemNotification(msg.text);
+        } else {
+          renderSingleMessage(msg);
+        }
       });
     }
   }
@@ -390,8 +407,21 @@ app.get('/', (req, res) => {
     container.scrollTop = container.scrollHeight;
   }
 
+  function renderSystemNotification(text) {
+    const container = document.getElementById('chat-messages');
+    const div = document.createElement('div');
+    div.className = 'system-notification';
+    div.innerText = text;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+  }
+
   socket.on('receive_message', function(msg) {
-    renderSingleMessage(msg);
+    if (msg.type === 'system') {
+      renderSystemNotification(msg.text);
+    } else {
+      renderSingleMessage(msg);
+    }
   });
 
   socket.on('message_deleted', function(data) {
@@ -470,13 +500,29 @@ io.on('connection', (socket) => {
       return callback({ success: false, error: '部屋が満員です（最大3名）' });
     }
 
+    let isNewJoin = false;
+
     // 新規参加の場合はメンバーリストに追加
     if (!existingMember) {
       const colorIndex = room.members.length > 1 ? 1 : 0;
       room.members.push({ id: socket.id, nickname, colorIndex });
+      isNewJoin = true;
+    } else {
+      // 再接続（リロード等）の場合は名前を更新
+      existingMember.nickname = nickname;
     }
 
     socket.join(roomId);
+
+    // 新規参加の場合のみ「◯◯が入室しました」というシステムメッセージを部屋に送信
+    if (isNewJoin) {
+      const systemMsg = {
+        type: 'system',
+        text: `${nickname} が入室しました`
+      };
+      room.messages.push(systemMsg);
+      io.to(roomId).emit('receive_message', systemMsg);
+    }
 
     callback({ success: true, roomName: room.name, messages: room.messages });
     io.to(roomId).emit('update_members', { count: room.members.length });
@@ -489,6 +535,7 @@ io.on('connection', (socket) => {
     const sender = room.members.find(m => m.id === socket.id);
 
     const messageData = {
+      type: 'user',
       id: Math.random().toString(36).substring(2, 10),
       senderId: socket.id,
       senderName: sender ? sender.nickname : '匿名',
@@ -513,13 +560,22 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 接続切断（24時間維持するため、メンバー数が0になっても部屋を即時削除しない）
+  // 接続切断
   socket.on('disconnect', () => {
     for (const roomId in rooms) {
       const room = rooms[roomId];
       const index = room.members.findIndex(m => m.id === socket.id);
       if (index !== -1) {
+        const leavingUser = room.members[index];
         room.members.splice(index, 1);
+        
+        // 退室通知を送信
+        const systemMsg = {
+          type: 'system',
+          text: `${leavingUser.nickname} が退室しました`
+        };
+        room.messages.push(systemMsg);
+        io.to(roomId).emit('receive_message', systemMsg);
         io.to(roomId).emit('update_members', { count: room.members.length });
         break;
       }
