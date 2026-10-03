@@ -145,10 +145,8 @@ app.get('/', (req, res) => {
     <h3>部屋を作成</h3>
     <label>部屋名</label>
     <input type="text" id="create-room-name" placeholder="例: ひみつの部屋">
-    <label>パスワード 1（2人目用）</label>
-    <input type="password" id="create-pass1" placeholder="パスワード1">
-    <label>パスワード 2（3人目用）</label>
-    <input type="password" id="create-pass2" placeholder="パスワード2">
+    <label>共通パスワード（参加者用）</label>
+    <input type="password" id="create-password" placeholder="合言葉を入力">
     <label>あなたのニックネーム</label>
     <input type="text" id="create-nickname" placeholder="名無し">
     <button onclick="createRoom()">作成して入室</button>
@@ -160,7 +158,7 @@ app.get('/', (req, res) => {
     <h3 id="join-target-room-title">部屋に入室</h3>
     <label>あなたのニックネーム</label>
     <input type="text" id="join-nickname" placeholder="名無し">
-    <label>簡易パスワード</label>
+    <label>パスワード</label>
     <input type="password" id="join-password" placeholder="パスワードを入力">
     <button onclick="joinRoom()">入室する</button>
     <button class="btn-secondary" style="margin-top: 10px;" onclick="goHome()">トップに戻る（部屋作成 / 別の部屋へ）</button>
@@ -198,12 +196,11 @@ app.get('/', (req, res) => {
     const savedRoomId = sessionStorage.getItem('currentRoomId');
     const savedNickname = sessionStorage.getItem('myNickname');
     const savedPassword = sessionStorage.getItem('myPassword');
-    const isHost = sessionStorage.getItem('isHost');
 
-    if (savedRoomId && savedRoomId === roomId && (savedPassword || isHost)) {
+    if (savedRoomId && savedRoomId === roomId) {
       currentRoomId = savedRoomId;
       myNickname = savedNickname || 'ゲスト';
-      socket.emit('join_room', { roomId: currentRoomId, password: savedPassword, nickname: myNickname, isHost: isHost === 'true' }, function(res) {
+      socket.emit('join_room', { roomId: currentRoomId, password: savedPassword, nickname: myNickname }, function(res) {
         if (res.success) {
           setupChatView(res.roomName, res.messages);
         } else {
@@ -249,23 +246,21 @@ app.get('/', (req, res) => {
     sessionStorage.removeItem('currentRoomId');
     sessionStorage.removeItem('myNickname');
     sessionStorage.removeItem('myPassword');
-    sessionStorage.removeItem('isHost');
   }
 
   function createRoom() {
     const name = document.getElementById('create-room-name').value || '無題の部屋';
-    const pass1 = document.getElementById('create-pass1').value;
-    const pass2 = document.getElementById('create-pass2').value;
+    const password = document.getElementById('create-password').value;
     myNickname = document.getElementById('create-nickname').value || '部屋主';
 
-    if (!pass1 || !pass2) return alert('パスワードを2つ設定してください');
+    if (!password) return alert('パスワードを設定してください');
 
-    socket.emit('create_room', { name: name, pass1: pass1, pass2: pass2, nickname: myNickname }, function(res) {
+    socket.emit('create_room', { name: name, password: password, nickname: myNickname }, function(res) {
       if (res.success) {
         currentRoomId = res.roomId;
         sessionStorage.setItem('currentRoomId', currentRoomId);
         sessionStorage.setItem('myNickname', myNickname);
-        sessionStorage.setItem('isHost', 'true');
+        sessionStorage.setItem('myPassword', password);
         setupChatView(name, []);
       }
     });
@@ -380,7 +375,6 @@ app.get('/', (req, res) => {
     div.id = 'msg-' + msg.id;
 
     let html = '';
-    // 自分の発言の場合のみ削除ボタンを表示
     if (isSelf) {
       html += '<span class="del-btn" onclick="deleteMessage(\\\'' + msg.id + '\\\')">✕ 削除</span>';
     }
@@ -435,31 +429,51 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('create_room', ({ name, pass1, pass2, nickname }, callback) => {
+  // 部屋作成
+  socket.on('create_room', ({ name, password, nickname }, callback) => {
     const roomId = Math.random().toString(36).substring(2, 8);
-    rooms[roomId] = { name, pass1, pass2, members: [{ id: socket.id, nickname, role: 'host', colorIndex: 0 }], messages: [] };
+    
+    rooms[roomId] = {
+      name,
+      password,
+      members: [{ id: socket.id, nickname, colorIndex: 0 }],
+      messages: []
+    };
+
+    // 24時間（86,400,000ミリ秒）後に部屋を完全削除
+    setTimeout(() => {
+      if (rooms[roomId]) {
+        delete rooms[roomId];
+        console.log(`部屋 ${roomId} を24時間経過のため自動削除しました`);
+      }
+    }, 24 * 60 * 60 * 1000);
+
     socket.join(roomId);
     callback({ success: true, roomId, messages: [] });
     io.to(roomId).emit('update_members', { count: rooms[roomId].members.length });
   });
 
-  socket.on('join_room', ({ roomId, password, nickname, isHost }, callback) => {
+  // 部屋入室
+  socket.on('join_room', ({ roomId, password, nickname }, callback) => {
     const room = rooms[roomId];
     if (!room) return callback({ success: false, error: '部屋が存在しません（または消去されました）' });
 
-    if (!isHost) {
-      const isValidPass = (password === room.pass1 || password === room.pass2);
-      if (!isValidPass) return callback({ success: false, error: 'パスワードが正しくありません' });
-    }
-
-    if (room.members.length >= 3 && !room.members.find(m => m.id === socket.id)) {
-      return callback({ success: false, error: '部屋が満員です（最大3名）' });
+    // パスワードチェック
+    if (room.password && password !== room.password) {
+      return callback({ success: false, error: 'パスワードが正しくありません' });
     }
 
     const existingMember = room.members.find(m => m.id === socket.id);
+
+    // 既に3名（上限）に達しており、かつ自分が既存メンバーでない場合はブロック
+    if (!existingMember && room.members.length >= 3) {
+      return callback({ success: false, error: '部屋が満員です（最大3名）' });
+    }
+
+    // 新規参加の場合はメンバーリストに追加
     if (!existingMember) {
       const colorIndex = room.members.length > 1 ? 1 : 0;
-      room.members.push({ id: socket.id, nickname, role: isHost ? 'host' : 'guest', colorIndex });
+      room.members.push({ id: socket.id, nickname, colorIndex });
     }
 
     socket.join(roomId);
@@ -468,6 +482,7 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('update_members', { count: room.members.length });
   });
 
+  // メッセージ送信
   socket.on('send_message', ({ roomId, text, image }) => {
     const room = rooms[roomId];
     if (!room) return;
@@ -491,7 +506,6 @@ io.on('connection', (socket) => {
     const room = rooms[roomId];
     if (room) {
       const targetMsg = room.messages.find(m => m.id === msgId);
-      // 本人のメッセージの場合のみ削除を実行
       if (targetMsg && targetMsg.senderId === socket.id) {
         room.messages = room.messages.filter(m => m.id !== msgId);
         io.to(roomId).emit('message_deleted', { msgId });
@@ -499,6 +513,7 @@ io.on('connection', (socket) => {
     }
   });
 
+  // 接続切断（24時間維持するため、メンバー数が0になっても部屋を即時削除しない）
   socket.on('disconnect', () => {
     for (const roomId in rooms) {
       const room = rooms[roomId];
@@ -506,7 +521,6 @@ io.on('connection', (socket) => {
       if (index !== -1) {
         room.members.splice(index, 1);
         io.to(roomId).emit('update_members', { count: room.members.length });
-        if (room.members.length === 0) delete rooms[roomId];
         break;
       }
     }
