@@ -76,20 +76,24 @@ app.get('/', (req, res) => {
     .container { width: 100%; max-width: 500px; background: var(--card-bg); border-radius: 16px; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; height: 90vh; position: relative; }
     
     /* 3段ヘッダーレイアウト */
-    .header { padding: 10px 14px; border-bottom: 1px solid var(--border-color); background: #111827; display: flex; flex-direction: column; gap: 4px; }
+    .header { padding: 10px 14px; border-bottom: 1px solid var(--border-color); background: #111827; display: flex; flex-direction: column; gap: 6px; }
     .header-row { display: flex; justify-content: space-between; align-items: center; width: 100%; white-space: nowrap; }
     
     .header .room-name { color: var(--accent-color); font-weight: bold; cursor: pointer; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; font-size: 1.05rem; }
     .header-sub-info { font-size: 0.75rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-    .header-copy-btn { background: #334155; color: #f8fafc; border: none; padding: 2px 5px; border-radius: 4px; cursor: pointer; font-size: 0.65rem; line-height: 1.2; flex-shrink: 0; }
+    .header-copy-btn { background: #334155; color: #f8fafc; border: none; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-size: 0.7rem; line-height: 1.2; flex-shrink: 0; margin: 0; }
     .header-copy-btn:hover { background: #475569; }
 
     .version-tag { font-size: 0.65rem; color: #64748b; flex-shrink: 0; }
     
-    /* 退室ボタン用スタイル */
-    .btn-leave { background: #ef4444; color: white; border: none; padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: bold; width: 100%; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .btn-leave:hover { background: #dc2626; }
-    .btn-leave .sub-text { font-size: 0.62rem; font-weight: normal; opacity: 0.9; margin-left: 4px; display: inline-block; }
+    /* ボタンエリア（退室・削除） */
+    .btn-action-group { display: flex; gap: 8px; width: 100%; }
+    .btn-leave { background: #64748b; color: white; border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: bold; flex: 1; text-align: center; line-height: 1.2; }
+    .btn-leave:hover { background: #475569; }
+    .btn-leave .sub-text { font-size: 0.6rem; font-weight: normal; opacity: 0.85; display: block; margin-top: 2px; }
+
+    .btn-delete-room { background: #ef4444; color: white; border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: bold; line-height: 1.2; white-space: nowrap; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+    .btn-delete-room:hover { background: #dc2626; }
 
     .view { display: none; padding: 20px; flex-direction: column; height: 100%; overflow-y: auto; }
     .view.active { display: flex; }
@@ -132,12 +136,15 @@ app.get('/', (req, res) => {
 
     .chat-img { max-width: 100%; max-height: 200px; border-radius: 8px; margin-top: 6px; cursor: pointer; user-select: none; -webkit-user-drag: none; }
     
-    .input-area { display: flex; flex-direction: column; gap: 4px; padding-top: 10px; border-top: 1px solid var(--border-color); }
+    .input-area { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--border-color); }
     
     .typing-indicator { font-size: 0.75rem; color: var(--text-muted); font-style: italic; min-height: 1.1rem; }
     
     .input-row { display: flex; gap: 8px; align-items: flex-end; }
     .file-btn { background: #475569; color: white; padding: 12px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; margin: 0; width: auto; height: 44px; display: flex; align-items: center; justify-content: center; }
+
+    /* 安心注記メッセージのスタイル */
+    .security-disclaimer { font-size: 0.68rem; color: #94a3b8; line-height: 1.35; margin-top: 4px; padding: 0 2px; }
   </style>
 </head>
 <body>
@@ -147,21 +154,25 @@ app.get('/', (req, res) => {
     <!-- 1段目: 左詰め 部屋名 / 右詰め Ver.表記 -->
     <div class="header-row">
       <span class="room-name" id="header-room-name" onclick="goHome()">SimpleChatee</span>
-      <span class="version-tag">Ver. 1.1.1</span>
+      <span class="version-tag">Ver. 1.1.2</span>
     </div>
-    <!-- 2段目: 左詰め 部屋ID・コピー / 右詰め 人数 -->
-    <div class="header-row">
-      <div id="header-room-id-container" class="header-sub-info" style="display: none;">
+    <!-- 2段目: 部屋ID・コピー・人数を1行で水平配置 -->
+    <div class="header-row" id="header-room-id-container" style="display: none;">
+      <div class="header-sub-info">
         <span>部屋ID: <span id="display-room-id"></span></span>
         <button class="header-copy-btn" onclick="copyRoomLink()">🔗コピー</button>
       </div>
-      <span id="member-count" style="font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; margin-left: auto;"></span>
+      <span id="member-count" style="font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; margin-left: auto;"></span>
     </div>
-    <!-- 3段目: 退室ボタン -->
-    <div class="header-row">
-      <div id="room-action-container" style="display: none; width: 100%; margin-top: 2px;">
+    <!-- 3段目: 退室・部屋削除ボタン -->
+    <div class="header-row" id="room-action-container" style="display: none;">
+      <div class="btn-action-group">
         <button class="btn-leave" onclick="leaveRoom()">
-          退室する<span class="sub-text">(同じブラウザならトップ画面からPWなしで再入室も可能)</span>
+          退室する
+          <span class="sub-text">(同じブラウザならトップ画面からPWなしで再入室も可能)</span>
+        </button>
+        <button id="btn-delete-room" class="btn-delete-room" style="display: none;" onclick="deleteRoom()">
+          部屋を削除する
         </button>
       </div>
     </div>
@@ -222,6 +233,10 @@ app.get('/', (req, res) => {
         <textarea id="msg-input" placeholder="メッセージを入力..." oninput="handleTyping()" onkeydown="onKeyDown(event)"></textarea>
         <button style="margin-top:0; width:auto; padding: 0 16px; height: 44px;" onclick="sendMessage()">送信</button>
       </div>
+      <!-- 安心注記メッセージ -->
+      <div class="security-disclaimer">
+        🔒 チャット内容はE2E暗号化により管理者も閲覧不可です。画像は1時間以内に自動削除されます。作成された部屋は作成者が削除するまで残ります。
+      </div>
     </div>
   </div>
 </div>
@@ -234,6 +249,7 @@ app.get('/', (req, res) => {
   let myNickname = '';
   let userSessionId = '';
   let selectedFile = null;
+  let isHost = false;
   
   let typingTimeout = null;
   let isTyping = false;
@@ -340,6 +356,7 @@ app.get('/', (req, res) => {
     socket.emit('join_room', { roomId, password, nickname: myNickname, sessionId: userSessionId }, function(res) {
       if (res.success) {
         saveRoomToStorage(roomId, res.roomName, myNickname, password);
+        isHost = res.isHost;
         setupChatView(res.roomName, res.messages);
       } else {
         alert(res.error || '入室に失敗しました');
@@ -376,6 +393,7 @@ app.get('/', (req, res) => {
     document.getElementById('header-room-id-container').style.display = 'none';
     document.getElementById('member-count').innerText = '';
     document.getElementById('room-action-container').style.display = 'none';
+    document.getElementById('btn-delete-room').style.display = 'none';
     renderSavedRoomsList();
     showView('view-home');
   }
@@ -391,6 +409,7 @@ app.get('/', (req, res) => {
     socket.emit('create_room', { name: name, password: password, nickname: myNickname, sessionId: userSessionId }, function(res) {
       if (res.success) {
         currentRoomId = res.roomId;
+        isHost = true;
         saveRoomToStorage(currentRoomId, name, myNickname, password);
         setupChatView(name, []);
       }
@@ -410,6 +429,7 @@ app.get('/', (req, res) => {
     currentPassword = password;
     socket.emit('join_room', { roomId: currentRoomId, password: password, nickname: myNickname, sessionId: userSessionId }, function(res) {
       if (res.success) {
+        isHost = res.isHost;
         saveRoomToStorage(currentRoomId, res.roomName, myNickname, password);
         setupChatView(res.roomName, res.messages);
       } else {
@@ -419,18 +439,39 @@ app.get('/', (req, res) => {
   }
 
   function leaveRoom() {
-    if (confirm('本当にこの部屋から退室しますか？\\n（トップページの保存リストからも削除されます）')) {
+    if (confirm('本当にこの部屋から退室しますか？\\n（トップページの保存リストから再入室可能です）')) {
       socket.emit('leave_room', { roomId: currentRoomId, sessionId: userSessionId });
-      removeRoomFromStorage(currentRoomId);
       goHome();
+    }
+  }
+
+  function deleteRoom() {
+    if (confirm('【警告】本当にこの部屋を削除しますか？\\nこの操作を行うと部屋が消去され、参加者全員が強制退室されます。')) {
+      socket.emit('delete_room', { roomId: currentRoomId, sessionId: userSessionId }, function(res) {
+        if (res.success) {
+          alert('部屋を削除しました');
+          removeRoomFromStorage(currentRoomId);
+          goHome();
+        } else {
+          alert(res.error || '削除権限がありません');
+        }
+      });
     }
   }
 
   function setupChatView(roomName, messages) {
     document.getElementById('header-room-name').innerText = roomName;
     document.getElementById('display-room-id').innerText = currentRoomId;
-    document.getElementById('header-room-id-container').style.display = 'inline-flex';
-    document.getElementById('room-action-container').style.display = 'block';
+    document.getElementById('header-room-id-container').style.display = 'flex';
+    document.getElementById('room-action-container').style.display = 'flex';
+    
+    // ホスト（作成者）のみ削除ボタンを表示
+    if (isHost) {
+      document.getElementById('btn-delete-room').style.display = 'flex';
+    } else {
+      document.getElementById('btn-delete-room').style.display = 'none';
+    }
+
     window.history.pushState({}, '', '?room=' + currentRoomId);
     showView('view-chat');
 
@@ -596,6 +637,13 @@ app.get('/', (req, res) => {
     }
   });
 
+  // 部屋削除イベント（他参加者への強制退出）
+  socket.on('room_deleted_by_host', function() {
+    alert('部屋主によってこの部屋は削除されました。');
+    removeRoomFromStorage(currentRoomId);
+    goHome();
+  });
+
   function openImageInNewTab(src) {
     window.open(src, '_blank');
   }
@@ -629,6 +677,7 @@ io.on('connection', (socket) => {
     rooms[roomId] = {
       name,
       password,
+      hostSessionId: sessionId, // ホスト識別ID
       members: [{ id: socket.id, sessionId, nickname, colorIndex: 0 }],
       messages: []
     };
@@ -677,11 +726,13 @@ io.on('connection', (socket) => {
       io.to(roomId).emit('receive_message', systemMsg);
     }
 
-    callback({ success: true, roomName: room.name, messages: room.messages });
+    const isHost = (room.hostSessionId === sessionId);
+
+    callback({ success: true, roomName: room.name, messages: room.messages, isHost });
     io.to(roomId).emit('update_members', { count: room.members.length });
   });
 
-  // 明示的な退室処理
+  // 退室処理（部屋は消えない）
   socket.on('leave_room', ({ roomId, sessionId }) => {
     const room = rooms[roomId];
     if (!room) return;
@@ -700,6 +751,21 @@ io.on('connection', (socket) => {
       io.to(roomId).emit('update_members', { count: room.members.length });
       socket.leave(roomId);
     }
+  });
+
+  // 部屋削除処理（ホスト専用）
+  socket.on('delete_room', ({ roomId, sessionId }, callback) => {
+    const room = rooms[roomId];
+    if (!room) return callback({ success: false, error: '部屋が存在しません' });
+
+    if (room.hostSessionId !== sessionId) {
+      return callback({ success: false, error: '部屋を削除する権限がありません' });
+    }
+
+    // 全部屋メンバーに通知
+    io.to(roomId).emit('room_deleted_by_host');
+    delete rooms[roomId];
+    callback({ success: true });
   });
 
   // 入力開始通知
