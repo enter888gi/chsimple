@@ -182,7 +182,7 @@ app.get('/', (req, res) => {
   let myNickname = '';
   let selectedFile = null;
 
-  window.onload = () => {
+  window.onload = function() {
     const urlParams = new URLSearchParams(window.location.search);
     const roomId = urlParams.get('room');
     
@@ -194,7 +194,7 @@ app.get('/', (req, res) => {
     if (savedRoomId && savedRoomId === roomId && (savedPassword || isHost)) {
       currentRoomId = savedRoomId;
       myNickname = savedNickname || 'ゲスト';
-      socket.emit('join_room', { roomId: currentRoomId, password: savedPassword, nickname: myNickname, isHost: isHost === 'true' }, (res) => {
+      socket.emit('join_room', { roomId: currentRoomId, password: savedPassword, nickname: myNickname, isHost: isHost === 'true' }, function(res) {
         if (res.success) {
           setupChatView(res.roomName);
         } else {
@@ -214,7 +214,8 @@ app.get('/', (req, res) => {
   }
 
   function showView(id) {
-    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    const views = document.querySelectorAll('.view');
+    views.forEach(function(v) { v.classList.remove('active'); });
     document.getElementById(id).classList.add('active');
   }
 
@@ -241,7 +242,7 @@ app.get('/', (req, res) => {
 
     if (!pass1 || !pass2) return alert('パスワードを2つ設定してください');
 
-    socket.emit('create_room', { name, pass1, pass2, nickname: myNickname }, (res) => {
+    socket.emit('create_room', { name: name, pass1: pass1, pass2: pass2, nickname: myNickname }, function(res) {
       if (res.success) {
         currentRoomId = res.roomId;
         sessionStorage.setItem('currentRoomId', currentRoomId);
@@ -262,7 +263,7 @@ app.get('/', (req, res) => {
     myNickname = document.getElementById('join-nickname').value || 'ゲスト';
     const password = document.getElementById('join-password').value;
 
-    socket.emit('join_room', { roomId: currentRoomId, password, nickname: myNickname }, (res) => {
+    socket.emit('join_room', { roomId: currentRoomId, password: password, nickname: myNickname }, function(res) {
       if (res.success) {
         sessionStorage.setItem('currentRoomId', currentRoomId);
         sessionStorage.setItem('myNickname', myNickname);
@@ -283,8 +284,8 @@ app.get('/', (req, res) => {
 
   function copyRoomLink() {
     const url = window.location.origin + '?room=' + currentRoomId;
-    navigator.clipboard.writeText(url).then(() => {
-      alert('部屋の招待URLをコピーしました！\nパスワードと一緒に友達に共有してください。');
+    navigator.clipboard.writeText(url).then(function() {
+      alert('部屋の招待URLをコピーしました！\\nパスワードと一緒に友達に共有してください。');
     });
   }
 
@@ -330,20 +331,20 @@ app.get('/', (req, res) => {
   }
 
   function deleteMessage(msgId) {
-    socket.emit('delete_message', { roomId: currentRoomId, msgId });
+    socket.emit('delete_message', { roomId: currentRoomId, msgId: msgId });
   }
 
-  socket.on('receive_message', (msg) => {
+  socket.on('receive_message', function(msg) {
     const container = document.getElementById('chat-messages');
     const div = document.createElement('div');
     div.className = 'message ' + (msg.senderId === socket.id ? 'self' : '');
     div.id = 'msg-' + msg.id;
 
-    let html = \`<span class="del-btn" onclick="deleteMessage('\${msg.id}')">✕ 削除</span>\`;
-    html += \`<div class="sender">\${msg.senderName}</div>\`;
-    if (msg.text) html += \`<div>\${escapeHtml(msg.text)}</div>\`;
+    let html = '<span class="del-btn" onclick="deleteMessage(\\\'' + msg.id + '\\\')">✕ 削除</span>';
+    html += '<div class="sender">' + escapeHtml(msg.senderName) + '</div>';
+    if (msg.text) html += '<div>' + escapeHtml(msg.text) + '</div>';
     if (msg.image) {
-      html += \`<img src="\${msg.image}" class="chat-img" onclick="openModal('\${msg.image}')" onerror="this.alt='(送信から1時間経過のため画像は削除されました)'; this.style.display='none';">\`;
+      html += '<img src="' + msg.image + '" class="chat-img" onclick="openModal(\\\'' + msg.image + '\\\')" onerror="this.alt=\\\'(送信から1時間経過のため画像は削除されました)\\\'; this.style.display=\\\'none\\\';">';
     }
 
     div.innerHTML = html;
@@ -351,13 +352,13 @@ app.get('/', (req, res) => {
     container.scrollTop = container.scrollHeight;
   });
 
-  socket.on('message_deleted', ({ msgId }) => {
-    const el = document.getElementById('msg-' + msgId);
+  socket.on('message_deleted', function(data) {
+    const el = document.getElementById('msg-' + data.msgId);
     if (el) el.remove();
   });
 
-  socket.on('update_members', ({ count }) => {
-    document.getElementById('member-count').innerText = \`(\${count}/3人)\`;
+  socket.on('update_members', function(data) {
+    document.getElementById('member-count').innerText = '(' + data.count + '/3人)';
   });
 
   function openModal(src) {
@@ -366,7 +367,9 @@ app.get('/', (req, res) => {
   }
 
   function escapeHtml(str) {
-    return str.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m]);
+    return str.replace(/[&<>"']/g, function(m) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
+    });
   }
 </script>
 </body>
