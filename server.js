@@ -13,7 +13,13 @@ const io = new Server(server, { maxHttpBufferSize: 1e7 });
 // --- Supabase (PostgreSQL) 接続設定 ---
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
+  ssl: { rejectUnauthorized: false },
+  connectionTimeoutMillis: 10000 // 10秒タイムアウト設定
+});
+
+// DBプールエラーハンドラ（プロセス落ち防止）
+pool.on('error', (err) => {
+  console.error('[DB Pool Error]', err);
 });
 
 // --- データベース初期化 ---
@@ -36,7 +42,7 @@ async function initDb() {
 }
 initDb();
 
-// --- DB操作用ヘルパー関数 ---
+// --- DB操作用ヘルパー関数（エラーと非存在を明確化） ---
 async function dbSaveRoom(roomId, roomName, password, hostSessionId) {
   try {
     const query = `
@@ -49,18 +55,20 @@ async function dbSaveRoom(roomId, roomName, password, hostSessionId) {
           last_activity_at = CURRENT_TIMESTAMP;
     `;
     await pool.query(query, [roomId, roomName, password, hostSessionId]);
+    return { success: true };
   } catch (err) {
     console.error('[DB] saveRoomエラー:', err);
+    return { success: false, error: err };
   }
 }
 
 async function dbGetRoom(roomId) {
   try {
     const res = await pool.query('SELECT * FROM rooms WHERE room_id = $1', [roomId]);
-    return res.rows[0];
+    return { data: res.rows[0] || null, dbError: false };
   } catch (err) {
     console.error('[DB] getRoomエラー:', err);
-    return null;
+    return { data: null, dbError: true };
   }
 }
 
@@ -82,10 +90,14 @@ async function dbUpdateActivity(roomId) {
 
 // オンメモリに部屋情報がなければ DB から自動復元する関数
 async function restoreRoomFromDb(roomId) {
-  if (!roomId) return null;
-  if (rooms[roomId]) return rooms[roomId];
+  if (!roomId) return { room: null, dbError: false };
+  if (rooms[roomId]) return { room: rooms[roomId], dbError: false };
 
-  const dbRoom = await dbGetRoom(roomId);
+  const { data: dbRoom, dbError } = await dbGetRoom(roomId);
+  if (dbError) {
+    return { room: null, dbError: true };
+  }
+
   if (dbRoom) {
     rooms[roomId] = {
       name: dbRoom.room_name,
@@ -95,9 +107,10 @@ async function restoreRoomFromDb(roomId) {
       messages: [],
       lastActivityAt: new Date(dbRoom.last_activity_at).getTime()
     };
-    return rooms[roomId];
+    return { room: rooms[roomId], dbError: false };
   }
-  return null;
+
+  return { room: null, dbError: false };
 }
 
 // --- 画像の保存先設定 (uploads フォルダ) ---
@@ -114,9 +127,8 @@ const storage = multer.diskStorage({
     cb(null, uniqueName);
   }
 });
-const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB上限
+const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
 
-// 静的ファイルとしてアップロード画像を公開
 app.use('/uploads', Express.static(uploadDir));
 
 // --- 部屋データ管理 ---
@@ -129,10 +141,8 @@ setInterval(async () => {
   for (const roomId in rooms) {
     const room = rooms[roomId];
     if (now - room.lastActivityAt > THIRTY_DAYS_MS) {
-      // 部屋のメンバー全員に通知
       io.to(roomId).emit('room_deleted_by_host', { reason: 'inactivity' });
       
-      // メッセージに含まれる画像ファイルを物理削除
       room.messages.forEach(msg => {
         if (msg.image) {
           const filename = path.basename(msg.image);
@@ -150,13 +160,12 @@ setInterval(async () => {
     }
   }
 
-  // DB上からも30日以上の無活動部屋を一括削除
   try {
     await pool.query(`DELETE FROM rooms WHERE last_activity_at < NOW() - INTERVAL '30 days'`);
   } catch (err) {
     console.error('DBクリーンアップエラー:', err);
   }
-}, 12 * 60 * 60 * 1000); // 12時間ごとにチェック
+}, 12 * 60 * 60 * 1000);
 
 // --- 画像アップロード API ---
 app.post('/api/upload', upload.single('image'), (req, res) => {
@@ -165,7 +174,6 @@ app.post('/api/upload', upload.single('image'), (req, res) => {
   const imageUrl = '/uploads/' + req.file.filename;
   const filePath = req.file.path;
 
-  // 1時間後に自動物理削除
   setTimeout(() => {
     fs.unlink(filePath, (err) => {
       if (err) console.error('画像自動削除エラー:', err);
@@ -186,7 +194,6 @@ app.get('/', (req, res) => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
   <title>SimpleChatee - Anonymous Chat</title>
-  <!-- 暗号化用ライブラリ CryptoJS (AES暗号化) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
   <style>
     :root {
@@ -202,7 +209,6 @@ app.get('/', (req, res) => {
     
     .container { width: 100%; max-width: 500px; background: var(--card-bg); border-radius: 16px; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; height: 90vh; position: relative; }
     
-    /* 3段ヘッダーレイアウト */
     .header { padding: 10px 14px; border-bottom: 1px solid var(--border-color); background: #111827; display: flex; flex-direction: column; gap: 6px; }
     .header-row { display: flex; justify-content: space-between; align-items: center; width: 100%; white-space: nowrap; }
     
@@ -213,7 +219,6 @@ app.get('/', (req, res) => {
 
     .version-tag { font-size: 0.65rem; color: #64748b; flex-shrink: 0; }
     
-    /* ボタンエリア（退室・削除） - 7:3比率 */
     .btn-action-group { display: flex; gap: 6px; width: 100%; align-items: center; overflow: hidden; }
     .btn-leave { background: #64748b; color: white; border: none; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: bold; flex: 7; min-width: 0; text-align: left; line-height: 1.2; overflow: hidden; }
     .btn-leave:hover { background: #475569; }
@@ -286,7 +291,7 @@ app.get('/', (req, res) => {
   <div class="header">
     <div class="header-row">
       <span class="room-name" id="header-room-name" onclick="goHome()">SimpleChatee</span>
-      <span class="version-tag">Ver. 1.2.8</span>
+      <span class="version-tag">Ver. 1.2.9</span>
     </div>
     <div class="header-row" id="header-room-id-container" style="display: none;">
       <div class="header-sub-info">
@@ -382,10 +387,11 @@ app.get('/', (req, res) => {
   let typingTimeout = null;
   let isTyping = false;
 
-  // --- Socket.io 受信イベントリスナーを最上位で登録 ---
+  // --- Socket.io 受信イベントリスナー ---
   socket.on('connect', function() {
     console.log('[Socket.IO] connected:', socket.id);
 
+    // currentRoomId が有効な場合のみ再入室処理を行う（トップ画面滞在時は実行しない）
     if (currentRoomId && userSessionId) {
       socket.emit('rejoin_room', {
         roomId: currentRoomId,
@@ -405,7 +411,8 @@ app.get('/', (req, res) => {
 
   // 再接続時に部屋状態を同期
   socket.on('room_state_sync', function(data) {
-    if (!data || data.roomId !== currentRoomId) return;
+    // 現在部屋にいない（トップに戻っている）場合は同期処理をガードして復帰を防ぐ
+    if (!currentRoomId || !data || data.roomId !== currentRoomId) return;
 
     updateMemberCount(data.count);
 
@@ -421,7 +428,7 @@ app.get('/', (req, res) => {
   });
 
   socket.on('receive_message', function(msg) {
-    if (!msg) return;
+    if (!currentRoomId || !msg) return;
 
     if (msg.type === 'system') {
       renderSystemNotification(msg.text, msg.id);
@@ -431,12 +438,13 @@ app.get('/', (req, res) => {
   });
 
   socket.on('message_deleted', function(data) {
+    if (!currentRoomId) return;
     const el = document.getElementById('msg-' + data.msgId);
     if (el) el.remove();
   });
 
   socket.on('update_members', function(data) {
-    if (!data) return;
+    if (!currentRoomId || !data) return;
     updateMemberCount(data.count);
   });
 
@@ -449,6 +457,7 @@ app.get('/', (req, res) => {
   }
 
   socket.on('display_typing', function(data) {
+    if (!currentRoomId) return;
     const indicator = document.getElementById('typing-indicator');
     if (data.isTyping) {
       indicator.innerText = data.nickname + ' が入力中...';
@@ -458,6 +467,7 @@ app.get('/', (req, res) => {
   });
 
   socket.on('room_deleted_by_host', function(data) {
+    if (!currentRoomId) return;
     if (data && data.reason === 'inactivity') {
       alert('1ヶ月間無発話のため、部屋は自動削除されました。');
     } else {
@@ -560,6 +570,7 @@ app.get('/', (req, res) => {
   }
 
   function removeRoomFromStorage(roomId) {
+    if (!roomId) return;
     const rooms = getSavedRooms();
     delete rooms[roomId];
     localStorage.setItem('myJoinedRooms', JSON.stringify(rooms));
@@ -648,6 +659,10 @@ app.get('/', (req, res) => {
       } else {
         if (res.full) {
           showToast('現在満員です', () => { goHome(); });
+        } else if (res.dbError) {
+          // DB通信エラーの場合は保存データを削除せず通知のみ行う
+          alert('サーバー接続エラーが発生しました。時間をおいて再度お試しくさい。');
+          goHome();
         } else {
           alert(res.error || '入室に失敗しました');
           removeRoomFromStorage(roomId);
@@ -667,10 +682,16 @@ app.get('/', (req, res) => {
         document.getElementById('join-target-room-title').innerText = '「' + res.roomName + '」に入室';
         showView('view-join');
       } else {
-        alert('この部屋は存在しないか、削除されています');
-        removeRoomFromStorage(roomId);
-        renderSavedRoomsList();
-        goHome();
+        if (res.dbError) {
+          // DBエラー時はストレージ削除せずトップへ
+          alert('サーバー接続中にエラーが発生しました。ページをリロードして再度お試しください。');
+          goHome();
+        } else {
+          alert('この部屋は存在しないか、削除されています');
+          removeRoomFromStorage(roomId);
+          renderSavedRoomsList();
+          goHome();
+        }
       }
     });
   }
@@ -681,7 +702,15 @@ app.get('/', (req, res) => {
     document.getElementById(id).classList.add('active');
   }
 
+  // --- トップ画面遷移（サーバー離脱・部屋情報クリア処理） ---
   function goHome() {
+    if (currentRoomId) {
+      socket.emit('leave_room', {
+        roomId: currentRoomId,
+        sessionId: userSessionId
+      });
+    }
+
     currentRoomId = '';
     window.history.pushState({}, '', window.location.pathname);
     document.getElementById('header-room-name').innerText = 'SimpleChatee';
@@ -718,6 +747,8 @@ app.get('/', (req, res) => {
         if (typeof res.memberCount !== 'undefined') {
           updateMemberCount(res.memberCount);
         }
+      } else if (res.dbError) {
+        alert('データベース接続エラーにより作成できませんでした。');
       }
     });
   }
@@ -754,6 +785,8 @@ app.get('/', (req, res) => {
       } else {
         if (res.full) {
           showToast('現在満員です', () => { goHome(); });
+        } else if (res.dbError) {
+          alert('サーバー接続エラーが発生しました。');
         } else {
           alert(res.error || '入室に失敗しました');
         }
@@ -763,11 +796,6 @@ app.get('/', (req, res) => {
 
   function leaveRoom() {
     if (confirm('本当にこの部屋から退室しますか？')) {
-      socket.emit('leave_room', {
-        roomId: currentRoomId,
-        sessionId: userSessionId
-      });
-
       goHome();
     }
   }
@@ -949,12 +977,10 @@ app.get('/', (req, res) => {
   function renderSingleMessage(msg) {
     const container = document.getElementById('chat-messages');
     
-    // 重複防止処理
     if (document.getElementById('msg-' + msg.id)) return;
 
     const div = document.createElement('div');
     
-    // sessionId判定により自分/他人の左右表示を厳密に切り替え
     const isSelf = (msg.sessionId === userSessionId);
     const colorClass = isSelf ? 'self' : ('user-color-' + (msg.colorIndex || 0));
     
@@ -987,7 +1013,6 @@ app.get('/', (req, res) => {
   function renderSystemNotification(text, msgId) {
     const container = document.getElementById('chat-messages');
 
-    // システム通知の重複防止
     if (msgId && document.getElementById('system-msg-' + msgId)) {
       return;
     }
@@ -1028,19 +1053,16 @@ app.get('/', (req, res) => {
 // --- Socket.io サーバー側処理 ---
 io.on('connection', (socket) => {
 
-  // セッション情報保持ヘルパー
   function setSocketSession(roomId, sessionId) {
     socket.data.roomId = roomId;
     socket.data.sessionId = sessionId;
   }
 
-  // 現在アクティブなメンバー数を取得
   function getActiveMemberCount(room) {
     if (!room) return 0;
     return room.members.filter(m => m.id !== null).length;
   }
 
-  // メンバー数だけを部屋全員へ同期
   function emitMemberCount(roomId) {
     const room = rooms[roomId];
     if (!room) return;
@@ -1052,7 +1074,6 @@ io.on('connection', (socket) => {
     });
   }
 
-  // 指定ソケットへ部屋全体の状態を同期
   function syncRoomToSocket(targetSocket, roomId) {
     const room = rooms[roomId];
     if (!room) return;
@@ -1067,7 +1088,11 @@ io.on('connection', (socket) => {
   }
 
   socket.on('rejoin_room', async ({ roomId, sessionId, nickname }) => {
-    const room = await restoreRoomFromDb(roomId);
+    const { room, dbError } = await restoreRoomFromDb(roomId);
+
+    if (dbError) {
+      return socket.emit('db_error_notice');
+    }
 
     if (room) {
       socket.join(roomId);
@@ -1082,7 +1107,6 @@ io.on('connection', (socket) => {
           member.nickname = nickname;
         }
       } else {
-        // 既存メンバーリストにいなかった場合の復旧
         const colorIndex = room.members.length > 0
           ? (room.members.length % 2)
           : 0;
@@ -1098,16 +1122,20 @@ io.on('connection', (socket) => {
       room.lastActivityAt = Date.now();
       await dbUpdateActivity(roomId);
 
-      // 再接続した本人へ部屋状態を完全同期
       syncRoomToSocket(socket, roomId);
-
-      // 部屋全員へ最新人数を同期
       emitMemberCount(roomId);
     }
   });
 
   socket.on('get_room_info', async ({ roomId }, callback) => {
-    const room = await restoreRoomFromDb(roomId);
+    const { room, dbError } = await restoreRoomFromDb(roomId);
+
+    if (dbError) {
+      return callback({
+        success: false,
+        dbError: true
+      });
+    }
 
     callback({
       success: !!room,
@@ -1118,7 +1146,6 @@ io.on('connection', (socket) => {
   socket.on('create_room', async ({ name, password, nickname, sessionId }, callback) => {
     const roomId = Math.random().toString(36).substring(2, 8);
 
-    // 部屋作成者自身の最初の入室アナウンスを最初から保存
     const initialSystemMsg = {
       type: 'system',
       id: 'system-' + Math.random().toString(36).substring(2, 10),
@@ -1141,8 +1168,13 @@ io.on('connection', (socket) => {
       lastActivityAt: Date.now()
     };
 
-    // Supabase DB へ保存
-    await dbSaveRoom(roomId, name, password, sessionId);
+    const saveRes = await dbSaveRoom(roomId, name, password, sessionId);
+    if (!saveRes.success) {
+      return callback({
+        success: false,
+        dbError: true
+      });
+    }
 
     socket.join(roomId);
     setSocketSession(roomId, sessionId);
@@ -1159,7 +1191,14 @@ io.on('connection', (socket) => {
   });
 
   socket.on('join_room', async ({ roomId, password, nickname, sessionId }, callback) => {
-    const room = await restoreRoomFromDb(roomId);
+    const { room, dbError } = await restoreRoomFromDb(roomId);
+
+    if (dbError) {
+      return callback({
+        success: false,
+        dbError: true
+      });
+    }
 
     if (!room) {
       return callback({
@@ -1183,7 +1222,6 @@ io.on('connection', (socket) => {
       m => m.id !== null && m.sessionId !== sessionId
     );
 
-    // 既存参加者以外の新規入室で、アクティブ人数が上限（3人）の場合拒否
     if (!existingMember && activeMembers.length >= 3) {
       socket.emit('room_full_rejected');
 
@@ -1216,7 +1254,6 @@ io.on('connection', (socket) => {
     socket.join(roomId);
     setSocketSession(roomId, sessionId);
 
-    // 新規入室・明示的な再入室のどちらでも入室通知を作成して保存
     const systemMsg = {
       type: 'system',
       id: 'system-' + Math.random().toString(36).substring(2, 10),
@@ -1248,6 +1285,11 @@ io.on('connection', (socket) => {
     const targetRoomId = roomId || socket.data.roomId;
     const room = rooms[targetRoomId];
 
+    if (targetRoomId) {
+      socket.leave(targetRoomId);
+      socket.data.roomId = null;
+    }
+
     if (!room) return;
 
     const sessionId = socket.data.sessionId;
@@ -1272,15 +1314,12 @@ io.on('connection', (socket) => {
 
       io.to(targetRoomId).emit('receive_message', systemMsg);
       emitMemberCount(targetRoomId);
-
-      socket.leave(targetRoomId);
-      socket.data.roomId = null;
     }
   });
 
   socket.on('delete_room', async ({ roomId }, callback) => {
     const targetRoomId = roomId || socket.data.roomId;
-    const room = await restoreRoomFromDb(targetRoomId);
+    const { room } = await restoreRoomFromDb(targetRoomId);
 
     if (!room) {
       return callback({
@@ -1289,7 +1328,6 @@ io.on('connection', (socket) => {
       });
     }
 
-    // サーバー上のソケットデータからホスト権限を厳格判定
     if (room.hostSessionId !== socket.data.sessionId) {
       return callback({
         success: false,
@@ -1346,7 +1384,7 @@ io.on('connection', (socket) => {
 
   socket.on('send_message', async ({ msgId, roomId, text, image }) => {
     const targetRoomId = roomId || socket.data.roomId;
-    const room = await restoreRoomFromDb(targetRoomId);
+    const { room } = await restoreRoomFromDb(targetRoomId);
 
     if (!room) return;
 
