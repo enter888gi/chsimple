@@ -187,7 +187,7 @@ app.get('/', (req, res) => {
   <div class="header">
     <div class="header-row">
       <span class="room-name" id="header-room-name" onclick="goHome()">SimpleChatee</span>
-      <span class="version-tag">Ver. 1.2.3</span>
+      <span class="version-tag">Ver. 1.2.4</span>
     </div>
     <div class="header-row" id="header-room-id-container" style="display: none;">
       <div class="header-sub-info">
@@ -453,7 +453,7 @@ app.get('/', (req, res) => {
         saveRoomToStorage(roomId, res.roomName, myNickname, password);
         isHost = res.isHost || isRoomHostStored(roomId);
         if (isHost) setHostFlag(roomId);
-        setupChatView(res.roomName, res.messages);
+        setupChatView(res.roomName, res.messages, roomId);
       } else {
         if (res.full) {
           showToast('現在満員です', () => { goHome(); });
@@ -516,7 +516,7 @@ app.get('/', (req, res) => {
         isHost = true;
         setHostFlag(currentRoomId);
         saveRoomToStorage(currentRoomId, name, myNickname, password);
-        setupChatView(name, []);
+        setupChatView(name, [], currentRoomId);
       }
     });
   }
@@ -537,7 +537,7 @@ app.get('/', (req, res) => {
         isHost = res.isHost || isRoomHostStored(currentRoomId);
         if (isHost) setHostFlag(currentRoomId);
         saveRoomToStorage(currentRoomId, res.roomName, myNickname, password);
-        setupChatView(res.roomName, res.messages);
+        setupChatView(res.roomName, res.messages, currentRoomId);
       } else {
         if (res.full) {
           showToast('現在満員です', () => { goHome(); });
@@ -569,7 +569,9 @@ app.get('/', (req, res) => {
     }
   }
 
-  function setupChatView(roomName, messages) {
+  function setupChatView(roomName, messages, roomId) {
+    if (roomId) currentRoomId = roomId;
+
     document.getElementById('header-room-name').innerText = roomName;
     document.getElementById('display-room-id').innerText = currentRoomId;
     document.getElementById('header-room-id-container').style.display = 'flex';
@@ -908,13 +910,12 @@ io.on('connection', (socket) => {
     if (!room) return;
 
     const sessionId = socket.data.sessionId;
-    const idx = room.members.findIndex(m => m.sessionId === sessionId || m.id === socket.id);
+    const member = room.members.find(m => m.sessionId === sessionId || m.id === socket.id);
     
-    if (idx !== -1) {
-      const leavingUser = room.members[idx];
-      room.members.splice(idx, 1);
+    if (member) {
+      member.id = null; // ソケットを割り当て解除にして一時離脱状態に
       
-      const systemMsg = { type: 'system', text: `${leavingUser.nickname} が退室しました` };
+      const systemMsg = { type: 'system', text: `${member.nickname} が退室しました` };
       room.messages.push(systemMsg);
       
       io.to(targetRoomId).emit('receive_message', systemMsg);
@@ -970,9 +971,10 @@ io.on('connection', (socket) => {
     const sessionId = socket.data.sessionId;
     let sender = room.members.find(m => m.sessionId === sessionId || m.id === socket.id);
 
-    if (sender && sender.id !== socket.id) {
+    if (sender) {
       sender.id = socket.id;
       socket.join(targetRoomId);
+      setSocketSession(targetRoomId, sessionId);
     }
 
     room.lastActivityAt = Date.now();
