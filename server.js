@@ -13,7 +13,7 @@ const io = new Server(server, { maxHttpBufferSize: 1e7 });
 // --- Supabase (PostgreSQL) 接続設定 ---
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
   connectionTimeoutMillis: 10000 // 10秒タイムアウト設定
 });
 
@@ -42,7 +42,7 @@ async function initDb() {
 }
 initDb();
 
-// --- DB操作用ヘルパー関数（エラーと非存在を明確化） ---
+// --- DB操作用ヘルパー関数 ---
 async function dbSaveRoom(roomId, roomName, password, hostSessionId) {
   try {
     const query = `
@@ -116,7 +116,7 @@ async function restoreRoomFromDb(roomId) {
 // --- 画像の保存先設定 (uploads フォルダ) ---
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir);
+  fs.mkdirSync(uploadDir, { recursive: true });
 }
 
 const storage = multer.diskStorage({
@@ -134,7 +134,7 @@ app.use('/uploads', Express.static(uploadDir));
 // --- 部屋データ管理 ---
 const rooms = {};
 
-// --- 部屋の無活動クリーンアップ（30日以上無発話の部屋を自動削除） ---
+// --- 部屋の無活動クリーンアップ ---
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 setInterval(async () => {
   const now = Date.now();
@@ -391,7 +391,6 @@ app.get('/', (req, res) => {
   socket.on('connect', function() {
     console.log('[Socket.IO] connected:', socket.id);
 
-    // currentRoomId が有効な場合のみ再入室処理を行う（トップ画面滞在時は実行しない）
     if (currentRoomId && userSessionId) {
       socket.emit('rejoin_room', {
         roomId: currentRoomId,
@@ -399,6 +398,10 @@ app.get('/', (req, res) => {
         nickname: myNickname
       });
     }
+  });
+
+  socket.on('db_error_notice', function() {
+    alert('データベース接続エラーが発生しました。時間をおいて再接続をお試しください。');
   });
 
   socket.on('disconnect', function(reason) {
@@ -409,9 +412,7 @@ app.get('/', (req, res) => {
     console.error('[Socket.IO] connection error:', error);
   });
 
-  // 再接続時に部屋状態を同期
   socket.on('room_state_sync', function(data) {
-    // 現在部屋にいない（トップに戻っている）場合は同期処理をガードして復帰を防ぐ
     if (!currentRoomId || !data || data.roomId !== currentRoomId) return;
 
     updateMemberCount(data.count);
@@ -660,8 +661,7 @@ app.get('/', (req, res) => {
         if (res.full) {
           showToast('現在満員です', () => { goHome(); });
         } else if (res.dbError) {
-          // DB通信エラーの場合は保存データを削除せず通知のみ行う
-          alert('サーバー接続エラーが発生しました。時間をおいて再度お試しくさい。');
+          alert('サーバー接続エラーが発生しました。時間をおいて再度お試しください。');
           goHome();
         } else {
           alert(res.error || '入室に失敗しました');
@@ -683,7 +683,6 @@ app.get('/', (req, res) => {
         showView('view-join');
       } else {
         if (res.dbError) {
-          // DBエラー時はストレージ削除せずトップへ
           alert('サーバー接続中にエラーが発生しました。ページをリロードして再度お試しください。');
           goHome();
         } else {
@@ -702,7 +701,6 @@ app.get('/', (req, res) => {
     document.getElementById(id).classList.add('active');
   }
 
-  // --- トップ画面遷移（サーバー離脱・部屋情報クリア処理） ---
   function goHome() {
     if (currentRoomId) {
       socket.emit('leave_room', {
@@ -974,6 +972,7 @@ app.get('/', (req, res) => {
     imgEl.parentNode.appendChild(note);
   }
 
+  // --- HTMLエスケープ修正箇所 ---
   function renderSingleMessage(msg) {
     const container = document.getElementById('chat-messages');
     
@@ -992,7 +991,7 @@ app.get('/', (req, res) => {
     let html = '';
 
     if (isSelf) {
-      html += '<span class="del-btn" onclick="deleteMessage(\\\'' + msg.id + '\\\')">✕ 削除</span>';
+      html += '<span class="del-btn" onclick="deleteMessage(\'' + msg.id + '\')">✕ 削除</span>';
     }
     
     html += '<div class="sender">' + escapeHtml(msg.senderName) + '</div>';
@@ -1002,7 +1001,7 @@ app.get('/', (req, res) => {
     }
 
     if (msg.image) {
-      html += '<img src="' + msg.image + '" class="chat-img" onclick="openImageInNewTab(\\\'' + msg.image + '\\\')" onerror="handleImageError(this, \\\'' + msg.id + '\\\')">';
+      html += '<img src="' + msg.image + '" class="chat-img" onclick="openImageInNewTab(\'' + msg.image + '\')" onerror="handleImageError(this, \'' + msg.id + '\')">';
     }
 
     div.innerHTML = html;
@@ -1034,6 +1033,7 @@ app.get('/', (req, res) => {
   }
 
   function escapeHtml(str) {
+    if (!str) return '';
     return str.replace(/[&<>"']/g, function(m) {
       return {
         '&': '&amp;',
