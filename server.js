@@ -1,4 +1,4 @@
-Const Express = require('express');
+const Express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const multer = require('multer');
@@ -285,14 +285,47 @@ app.get('/', (req, res) => {
 
   // --- Socket.io 受信イベントリスナーを最上位で登録 ---
   socket.on('connect', function() {
-    if (currentRoomId) {
-      socket.emit('rejoin_room', { roomId: currentRoomId, sessionId: userSessionId, nickname: myNickname });
+    console.log('[Socket.IO] connected:', socket.id);
+
+    if (currentRoomId && userSessionId) {
+      socket.emit('rejoin_room', {
+        roomId: currentRoomId,
+        sessionId: userSessionId,
+        nickname: myNickname
+      });
+    }
+  });
+
+  socket.on('disconnect', function(reason) {
+    console.log('[Socket.IO] disconnected:', reason);
+  });
+
+  socket.on('connect_error', function(error) {
+    console.error('[Socket.IO] connection error:', error);
+  });
+
+  // 再接続時に部屋状態を同期
+  socket.on('room_state_sync', function(data) {
+    if (!data || data.roomId !== currentRoomId) return;
+
+    updateMemberCount(data.count);
+
+    if (Array.isArray(data.messages)) {
+      data.messages.forEach(function(msg) {
+        if (msg.type === 'system') {
+          renderSystemNotification(msg.text, msg.id);
+        } else {
+          renderSingleMessage(msg);
+        }
+      });
     }
   });
 
   socket.on('receive_message', function(msg) {
+    if (!msg) return;
+
     if (msg.type === 'system') {
-      renderSystemNotification(msg.text);
+      renderSystemNotification(msg.text, msg.id);
     } else {
       renderSingleMessage(msg);
     }
@@ -304,8 +337,17 @@ app.get('/', (req, res) => {
   });
 
   socket.on('update_members', function(data) {
-    document.getElementById('member-count').innerText = '(' + data.count + '/3人)';
+    if (!data) return;
+    updateMemberCount(data.count);
   });
+
+  function updateMemberCount(count) {
+    const memberCount = document.getElementById('member-count');
+    if (!memberCount) return;
+
+    const safeCount = Math.max(0, Math.min(3, Number(count) || 0));
+    memberCount.innerText = '(' + safeCount + '/3人)';
+  }
 
   socket.on('display_typing', function(data) {
     const indicator = document.getElementById('typing-indicator');
@@ -354,7 +396,11 @@ app.get('/', (req, res) => {
   function getOrCreateSessionId() {
     let sid = sessionStorage.getItem('userSessionId');
     if (!sid) {
-      sid = Math.random().toString(36).substring(2, 10);
+      sid = localStorage.getItem('userSessionId');
+      if (!sid) {
+        sid = Math.random().toString(36).substring(2, 10);
+        localStorage.setItem('userSessionId', sid);
+      }
       sessionStorage.setItem('userSessionId', sid);
     }
     return sid;
@@ -484,12 +530,24 @@ app.get('/', (req, res) => {
     currentRoomId = roomId;
     currentPassword = password;
     myNickname = nickname || 'ゲスト';
-    socket.emit('join_room', { roomId, password, nickname: myNickname, sessionId: userSessionId }, function(res) {
+
+    socket.emit('join_room', {
+      roomId,
+      password,
+      nickname: myNickname,
+      sessionId: userSessionId
+    }, function(res) {
       if (res.success) {
         saveRoomToStorage(roomId, res.roomName, myNickname, password);
         isHost = res.isHost || isRoomHostStored(roomId);
+
         if (isHost) setHostFlag(roomId);
+
         setupChatView(res.roomName, res.messages, roomId);
+
+        if (typeof res.memberCount !== 'undefined') {
+          updateMemberCount(res.memberCount);
+        }
       } else {
         if (res.full) {
           showToast('現在満員です', () => { goHome(); });
@@ -546,13 +604,23 @@ app.get('/', (req, res) => {
     if (!password) return alert('パスワードを設定してください');
 
     currentPassword = password;
-    socket.emit('create_room', { name: name, password: password, nickname: myNickname, sessionId: userSessionId }, function(res) {
+
+    socket.emit('create_room', {
+      name: name,
+      password: password,
+      nickname: myNickname,
+      sessionId: userSessionId
+    }, function(res) {
       if (res.success) {
         currentRoomId = res.roomId;
         isHost = true;
         setHostFlag(currentRoomId);
         saveRoomToStorage(currentRoomId, name, myNickname, password);
         setupChatView(name, [], currentRoomId);
+
+        if (typeof res.memberCount !== 'undefined') {
+          updateMemberCount(res.memberCount);
+        }
       }
     });
   }
@@ -568,12 +636,24 @@ app.get('/', (req, res) => {
     const password = document.getElementById('join-password').value;
 
     currentPassword = password;
-    socket.emit('join_room', { roomId: currentRoomId, password: password, nickname: myNickname, sessionId: userSessionId }, function(res) {
+
+    socket.emit('join_room', {
+      roomId: currentRoomId,
+      password: password,
+      nickname: myNickname,
+      sessionId: userSessionId
+    }, function(res) {
       if (res.success) {
         isHost = res.isHost || isRoomHostStored(currentRoomId);
+
         if (isHost) setHostFlag(currentRoomId);
+
         saveRoomToStorage(currentRoomId, res.roomName, myNickname, password);
         setupChatView(res.roomName, res.messages, currentRoomId);
+
+        if (typeof res.memberCount !== 'undefined') {
+          updateMemberCount(res.memberCount);
+        }
       } else {
         if (res.full) {
           showToast('現在満員です', () => { goHome(); });
@@ -586,7 +666,11 @@ app.get('/', (req, res) => {
 
   function leaveRoom() {
     if (confirm('本当にこの部屋から退室しますか？')) {
-      socket.emit('leave_room', { roomId: currentRoomId, sessionId: userSessionId });
+      socket.emit('leave_room', {
+        roomId: currentRoomId,
+        sessionId: userSessionId
+      });
+
       goHome();
     }
   }
@@ -624,10 +708,11 @@ app.get('/', (req, res) => {
 
     const container = document.getElementById('chat-messages');
     container.innerHTML = '';
+
     if (messages && messages.length > 0) {
       messages.forEach(function(msg) {
         if (msg.type === 'system') {
-          renderSystemNotification(msg.text);
+          renderSystemNotification(msg.text, msg.id);
         } else {
           renderSingleMessage(msg);
         }
@@ -656,8 +741,11 @@ app.get('/', (req, res) => {
       isTyping = true;
       socket.emit('typing_start', { roomId: currentRoomId });
     }
+
     clearTimeout(typingTimeout);
-    typingTimeout = setTimeout(() => { stopTyping(); }, 2000);
+    typingTimeout = setTimeout(() => {
+      stopTyping();
+    }, 2000);
   }
 
   function stopTyping() {
@@ -665,11 +753,13 @@ app.get('/', (req, res) => {
       isTyping = false;
       socket.emit('typing_stop', { roomId: currentRoomId });
     }
+
     clearTimeout(typingTimeout);
   }
 
   function onKeyDown(e) {
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
     if (!isMobile && e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
@@ -695,8 +785,13 @@ app.get('/', (req, res) => {
 
       const formData = new FormData();
       formData.append('image', selectedFile);
+
       try {
-        const res = await fetch('/api/upload', { method: 'POST', body: formData });
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData
+        });
+
         const data = await res.json();
         imageUrl = data.imageUrl;
       } catch (e) {
@@ -726,23 +821,31 @@ app.get('/', (req, res) => {
   }
 
   function deleteMessage(msgId) {
-    socket.emit('delete_message', { roomId: currentRoomId, msgId: msgId });
+    socket.emit('delete_message', {
+      roomId: currentRoomId,
+      msgId: msgId
+    });
   }
 
   function handleImageError(imgEl, msgId) {
     imgEl.onerror = null;
+
     if (isHost) {
       const thumbs = getAdminThumbnails(currentRoomId);
+
       if (thumbs[msgId]) {
         imgEl.src = thumbs[msgId];
         imgEl.className = 'chat-img-admin-thumb';
         return;
       }
     }
+
     imgEl.style.display = 'none';
+
     const note = document.createElement('div');
     note.className = 'expired-img-note';
     note.innerText = '🔒 画像は削除されました';
+
     imgEl.parentNode.appendChild(note);
   }
 
@@ -764,12 +867,17 @@ app.get('/', (req, res) => {
     const plainText = msg.text ? decryptText(msg.text, currentPassword) : '';
 
     let html = '';
+
     if (isSelf) {
       html += '<span class="del-btn" onclick="deleteMessage(\\\'' + msg.id + '\\\')">✕ 削除</span>';
     }
     
     html += '<div class="sender">' + escapeHtml(msg.senderName) + '</div>';
-    if (plainText) html += '<div class="text-content">' + escapeHtml(plainText) + '</div>';
+
+    if (plainText) {
+      html += '<div class="text-content">' + escapeHtml(plainText) + '</div>';
+    }
+
     if (msg.image) {
       html += '<img src="' + msg.image + '" class="chat-img" onclick="openImageInNewTab(\\\'' + msg.image + '\\\')" onerror="handleImageError(this, \\\'' + msg.id + '\\\')">';
     }
@@ -779,10 +887,21 @@ app.get('/', (req, res) => {
     container.scrollTop = container.scrollHeight;
   }
 
-  function renderSystemNotification(text) {
+  function renderSystemNotification(text, msgId) {
     const container = document.getElementById('chat-messages');
+
+    // システム通知の重複防止
+    if (msgId && document.getElementById('system-msg-' + msgId)) {
+      return;
+    }
+
     const div = document.createElement('div');
     div.className = 'system-notification';
+
+    if (msgId) {
+      div.id = 'system-msg-' + msgId;
+    }
+
     div.innerText = text;
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;
@@ -793,9 +912,14 @@ app.get('/', (req, res) => {
   }
 
   function escapeHtml(str) {
-    if (!str) return '';
-    return String(str).replace(/[&<>"']/g, function(m) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
+    return str.replace(/[&<>"']/g, function(m) {
+      return {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      }[m];
     });
   }
 </script>
@@ -813,39 +937,102 @@ io.on('connection', (socket) => {
     socket.data.sessionId = sessionId;
   }
 
+  // 現在アクティブなメンバー数を取得
+  function getActiveMemberCount(room) {
+    if (!room) return 0;
+    return room.members.filter(m => m.id !== null).length;
+  }
+
+  // メンバー数だけを部屋全員へ同期
+  function emitMemberCount(roomId) {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    const activeCount = getActiveMemberCount(room);
+
+    io.to(roomId).emit('update_members', {
+      count: activeCount
+    });
+  }
+
+  // 指定ソケットへ部屋全体の状態を同期
+  // 再接続時に、切断中に受信できなかったメッセージも復元する
+  function syncRoomToSocket(targetSocket, roomId) {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    const activeCount = getActiveMemberCount(room);
+
+    targetSocket.emit('room_state_sync', {
+      roomId: roomId,
+      count: activeCount,
+      messages: room.messages
+    });
+  }
+
   socket.on('rejoin_room', ({ roomId, sessionId, nickname }) => {
     const room = rooms[roomId];
+
     if (room) {
       socket.join(roomId);
       setSocketSession(roomId, sessionId);
 
       let member = room.members.find(m => m.sessionId === sessionId);
+
       if (member) {
         member.id = socket.id;
-        if (nickname) member.nickname = nickname;
+
+        if (nickname) {
+          member.nickname = nickname;
+        }
       } else {
         // 既存メンバーリストにいなかった場合の復旧
-        const colorIndex = room.members.length > 0 ? (room.members.length % 2) : 0;
-        room.members.push({ id: socket.id, sessionId, nickname: nickname || 'ゲスト', colorIndex });
+        const colorIndex = room.members.length > 0
+          ? (room.members.length % 2)
+          : 0;
+
+        room.members.push({
+          id: socket.id,
+          sessionId,
+          nickname: nickname || 'ゲスト',
+          colorIndex
+        });
       }
 
-      const activeCount = room.members.filter(m => m.id !== null).length;
-      io.to(roomId).emit('update_members', { count: activeCount });
+      room.lastActivityAt = Date.now();
+
+      // 再接続した本人へ部屋状態を完全同期
+      syncRoomToSocket(socket, roomId);
+
+      // 部屋全員へ最新人数を同期
+      emitMemberCount(roomId);
     }
   });
 
   socket.on('get_room_info', ({ roomId }, callback) => {
     const room = rooms[roomId];
-    callback({ success: !!room, roomName: room ? room.name : '' });
+
+    callback({
+      success: !!room,
+      roomName: room ? room.name : ''
+    });
   });
 
   socket.on('create_room', ({ name, password, nickname, sessionId }, callback) => {
     const roomId = Math.random().toString(36).substring(2, 8);
+
     rooms[roomId] = {
       name,
       password,
       hostSessionId: sessionId,
-      members: [{ id: socket.id, sessionId, nickname, colorIndex: 0 }],
+      members: [
+        {
+          id: socket.id,
+          sessionId,
+          nickname,
+          colorIndex: 0
+        }
+      ],
       messages: [],
       lastActivityAt: Date.now()
     };
@@ -853,31 +1040,67 @@ io.on('connection', (socket) => {
     socket.join(roomId);
     setSocketSession(roomId, sessionId);
 
-    callback({ success: true, roomId, messages: [] });
-    io.to(roomId).emit('update_members', { count: 1 });
+    callback({
+      success: true,
+      roomId,
+      messages: [],
+      isHost: true,
+      memberCount: 1
+    });
+
+    emitMemberCount(roomId);
   });
 
   socket.on('join_room', ({ roomId, password, nickname, sessionId }, callback) => {
     const room = rooms[roomId];
-    if (!room) return callback({ success: false, error: '部屋が存在しません' });
 
-    if (room.password && password !== room.password) {
-      return callback({ success: false, error: 'パスワードが正しくありません' });
+    if (!room) {
+      return callback({
+        success: false,
+        error: '部屋が存在しません'
+      });
     }
 
-    const existingMember = room.members.find(m => m.sessionId === sessionId);
-    const activeMembers = room.members.filter(m => m.id !== null && m.sessionId !== sessionId);
+    if (room.password && password !== room.password) {
+      return callback({
+        success: false,
+        error: 'パスワードが正しくありません'
+      });
+    }
+
+    const existingMember = room.members.find(
+      m => m.sessionId === sessionId
+    );
+
+    const activeMembers = room.members.filter(
+      m => m.id !== null && m.sessionId !== sessionId
+    );
 
     // 既存参加者以外の新規入室で、アクティブ人数が上限（3人）の場合拒否
     if (!existingMember && activeMembers.length >= 3) {
       socket.emit('room_full_rejected');
-      return callback({ success: false, full: true, error: '現在満員です' });
+
+      return callback({
+        success: false,
+        full: true,
+        error: '現在満員です'
+      });
     }
 
     let isNewJoin = false;
+
     if (!existingMember) {
-      const colorIndex = room.members.length > 0 ? (room.members.length % 2) : 0;
-      room.members.push({ id: socket.id, sessionId, nickname, colorIndex });
+      const colorIndex = room.members.length > 0
+        ? (room.members.length % 2)
+        : 0;
+
+      room.members.push({
+        id: socket.id,
+        sessionId,
+        nickname,
+        colorIndex
+      });
+
       isNewJoin = true;
     } else {
       existingMember.id = socket.id;
@@ -885,92 +1108,158 @@ io.on('connection', (socket) => {
     }
 
     room.lastActivityAt = Date.now();
+
     socket.join(roomId);
     setSocketSession(roomId, sessionId);
 
     if (isNewJoin) {
-      const systemMsg = { type: 'system', text: `${nickname} が入室しました` };
+      const systemMsg = {
+        type: 'system',
+        id: 'system-' + Math.random().toString(36).substring(2, 10),
+        text: `${nickname} が入室しました`
+      };
+
       room.messages.push(systemMsg);
+
+      // 現在部屋にいる全員へ即時通知
       io.to(roomId).emit('receive_message', systemMsg);
     }
 
     const isHost = (room.hostSessionId === sessionId);
-    const activeCount = room.members.filter(m => m.id !== null).length;
+    const activeCount = getActiveMemberCount(room);
 
-    callback({ success: true, roomName: room.name, messages: room.messages, isHost });
-    io.to(roomId).emit('update_members', { count: activeCount });
+    callback({
+      success: true,
+      roomName: room.name,
+      messages: room.messages,
+      isHost,
+      memberCount: activeCount
+    });
+
+    // 部屋全員へ最新人数を即時同期
+    emitMemberCount(roomId);
   });
 
   socket.on('leave_room', ({ roomId }) => {
     const targetRoomId = roomId || socket.data.roomId;
     const room = rooms[targetRoomId];
+
     if (!room) return;
 
     const sessionId = socket.data.sessionId;
-    const member = room.members.find(m => m.sessionId === sessionId || m.id === socket.id);
-    
+
+    const member = room.members.find(
+      m => m.sessionId === sessionId || m.id === socket.id
+    );
+
     if (member) {
-      member.id = null; // ソケットを割り当て解除にして一時離脱状態に
-      
-      const systemMsg = { type: 'system', text: `${member.nickname} が退室しました` };
+      member.id = null;
+
+      room.lastActivityAt = Date.now();
+
+      const systemMsg = {
+        type: 'system',
+        id: 'system-' + Math.random().toString(36).substring(2, 10),
+        text: `${member.nickname} が退室しました`
+      };
+
       room.messages.push(systemMsg);
-      
+
+      // 退室通知を部屋へ即時送信
       io.to(targetRoomId).emit('receive_message', systemMsg);
-      const activeCount = room.members.filter(m => m.id !== null).length;
-      io.to(targetRoomId).emit('update_members', { count: activeCount });
+
+      // 人数をサーバー状態から再計算して即時同期
+      emitMemberCount(targetRoomId);
+
       socket.leave(targetRoomId);
+
+      // このソケットが以前の部屋へ誤って再接続しないよう状態を解除
+      socket.data.roomId = null;
     }
   });
 
   socket.on('delete_room', ({ roomId }, callback) => {
     const targetRoomId = roomId || socket.data.roomId;
     const room = rooms[targetRoomId];
-    if (!room) return callback({ success: false, error: '部屋が存在しません' });
+
+    if (!room) {
+      return callback({
+        success: false,
+        error: '部屋が存在しません'
+      });
+    }
 
     // サーバー上のソケットデータからホスト権限を厳格判定
     if (room.hostSessionId !== socket.data.sessionId) {
-      return callback({ success: false, error: '部屋を削除する権限がありません' });
+      return callback({
+        success: false,
+        error: '部屋を削除する権限がありません'
+      });
     }
 
     room.messages.forEach(msg => {
       if (msg.image) {
         const filename = path.basename(msg.image);
         const filePath = path.join(uploadDir, filename);
-        if (fs.existsSync(filePath)) fs.unlink(filePath, () => {});
+
+        if (fs.existsSync(filePath)) {
+          fs.unlink(filePath, () => {});
+        }
       }
     });
 
     io.to(targetRoomId).emit('room_deleted_by_host');
+
     delete rooms[targetRoomId];
-    callback({ success: true });
+
+    callback({
+      success: true
+    });
   });
 
   socket.on('typing_start', ({ roomId }) => {
     const targetRoomId = roomId || socket.data.roomId;
     const room = rooms[targetRoomId];
+
     if (!room) return;
-    const sender = room.members.find(m => m.id === socket.id);
+
+    const sender = room.members.find(
+      m => m.id === socket.id
+    );
+
     if (sender) {
-      socket.to(targetRoomId).emit('display_typing', { nickname: sender.nickname, isTyping: true });
+      socket.to(targetRoomId).emit('display_typing', {
+        nickname: sender.nickname,
+        isTyping: true
+      });
     }
   });
 
   socket.on('typing_stop', ({ roomId }) => {
     const targetRoomId = roomId || socket.data.roomId;
-    socket.to(targetRoomId).emit('display_typing', { isTyping: false });
+
+    socket.to(targetRoomId).emit('display_typing', {
+      isTyping: false
+    });
   });
 
   socket.on('send_message', ({ msgId, roomId, text, image }) => {
     const targetRoomId = roomId || socket.data.roomId;
     const room = rooms[targetRoomId];
+
     if (!room) return;
 
     const sessionId = socket.data.sessionId;
-    let sender = room.members.find(m => m.sessionId === sessionId || m.id === socket.id);
+
+    let sender = room.members.find(
+      m => m.sessionId === sessionId || m.id === socket.id
+    );
 
     if (sender) {
       sender.id = socket.id;
+
       socket.join(targetRoomId);
+
       setSocketSession(targetRoomId, sessionId);
     }
 
@@ -987,37 +1276,59 @@ io.on('connection', (socket) => {
     };
 
     room.messages.push(messageData);
+
+    // テキスト・画像ともに部屋全員へリアルタイム送信
     io.to(targetRoomId).emit('receive_message', messageData);
   });
 
   socket.on('delete_message', ({ roomId, msgId }) => {
     const targetRoomId = roomId || socket.data.roomId;
     const room = rooms[targetRoomId];
+
     if (room) {
-      const targetMsg = room.messages.find(m => m.id === msgId);
+      const targetMsg = room.messages.find(
+        m => m.id === msgId
+      );
+
       // 送信者本人のセッションであるか検証して削除
-      if (targetMsg && targetMsg.sessionId === socket.data.sessionId) {
-        room.messages = room.messages.filter(m => m.id !== msgId);
-        io.to(targetRoomId).emit('message_deleted', { msgId });
+      if (
+        targetMsg &&
+        targetMsg.sessionId === socket.data.sessionId
+      ) {
+        room.messages = room.messages.filter(
+          m => m.id !== msgId
+        );
+
+        io.to(targetRoomId).emit('message_deleted', {
+          msgId
+        });
       }
     }
   });
 
   socket.on('disconnect', () => {
     const roomId = socket.data.roomId;
+
     if (roomId && rooms[roomId]) {
       const room = rooms[roomId];
-      const member = room.members.find(m => m.id === socket.id);
+
+      // このsocket自身に紐付いているメンバーだけを非アクティブ化
+      const member = room.members.find(
+        m => m.id === socket.id
+      );
+
       if (member) {
         member.id = null;
-        const activeCount = room.members.filter(m => m.id !== null).length;
-        io.to(roomId).emit('update_members', { count: activeCount });
+
+        // 切断後の人数を即時同期
+        emitMemberCount(roomId);
       }
     }
   });
 });
 
 const PORT = process.env.PORT || 3000;
+
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
