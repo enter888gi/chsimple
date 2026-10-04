@@ -1,11 +1,11 @@
-const express = require('express');
+const Express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-const app = express();
+const app = Express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e7 });
 
@@ -26,7 +26,7 @@ const storage = multer.diskStorage({
 const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB上限
 
 // 静的ファイルとしてアップロード画像を公開
-app.use('/uploads', express.static(uploadDir));
+app.use('/uploads', Express.static(uploadDir));
 
 // --- 部屋データ管理 ---
 const rooms = {};
@@ -114,13 +114,13 @@ app.get('/', (req, res) => {
 
     .version-tag { font-size: 0.65rem; color: #64748b; flex-shrink: 0; }
     
-    /* ボタンエリア（退室・削除） - スマホ幅最適化 */
+    /* ボタンエリア（退室・削除） - 7:3比率に設定 */
     .btn-action-group { display: flex; gap: 6px; width: 100%; align-items: center; overflow: hidden; }
-    .btn-leave { background: #64748b; color: white; border: none; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: bold; flex: 1; min-width: 0; text-align: left; line-height: 1.2; overflow: hidden; }
+    .btn-leave { background: #64748b; color: white; border: none; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: bold; flex: 7; min-width: 0; text-align: left; line-height: 1.2; overflow: hidden; }
     .btn-leave:hover { background: #475569; }
     .btn-leave .sub-text { font-size: 0.6rem; font-weight: normal; opacity: 0.85; display: block; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-    .btn-delete-room { background: #ef4444; color: white; border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: bold; line-height: 1.2; white-space: nowrap; flex-shrink: 0; display: flex; align-items: center; justify-content: center; height: 100%; }
+    .btn-delete-room { background: #ef4444; color: white; border: none; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: bold; line-height: 1.2; white-space: nowrap; flex: 3; display: none; align-items: center; justify-content: center; height: 100%; text-align: center; }
     .btn-delete-room:hover { background: #dc2626; }
 
     .view { display: none; padding: 20px; flex-direction: column; height: 100%; overflow-y: auto; }
@@ -194,7 +194,7 @@ app.get('/', (req, res) => {
     <!-- 1段目: 左詰め 部屋名 / 右詰め Ver.表記 -->
     <div class="header-row">
       <span class="room-name" id="header-room-name" onclick="goHome()">SimpleChatee</span>
-      <span class="version-tag">Ver. 1.2.0</span>
+      <span class="version-tag">Ver. 1.2.1</span>
     </div>
     <!-- 2段目: 部屋ID・コピー・人数を1行で水平配置 -->
     <div class="header-row" id="header-room-id-container" style="display: none;">
@@ -211,8 +211,8 @@ app.get('/', (req, res) => {
           退室する
           <span class="sub-text">(同じブラウザならトップからPWなしで再入室可)</span>
         </button>
-        <button id="btn-delete-room" class="btn-delete-room" style="display: none;" onclick="deleteRoom()">
-          部屋を削除する
+        <button id="btn-delete-room" class="btn-delete-room" onclick="deleteRoom()">
+          部屋削除
         </button>
       </div>
     </div>
@@ -703,6 +703,7 @@ app.get('/', (req, res) => {
     socket.emit('send_message', {
       msgId: msgId,
       roomId: currentRoomId,
+      sessionId: userSessionId,
       text: encryptedText,
       image: imageUrl
     });
@@ -714,7 +715,7 @@ app.get('/', (req, res) => {
   }
 
   function deleteMessage(msgId) {
-    socket.emit('delete_message', { roomId: currentRoomId, msgId: msgId });
+    socket.emit('delete_message', { roomId: currentRoomId, msgId: msgId, sessionId: userSessionId });
   }
 
   function handleImageError(imgEl, msgId) {
@@ -744,7 +745,8 @@ app.get('/', (req, res) => {
     const container = document.getElementById('chat-messages');
     const div = document.createElement('div');
     
-    const isSelf = (msg.senderId === socket.id);
+    // sessionId ベースで自分/他人の発言を判定（再接続後も一貫性を保持）
+    const isSelf = (msg.sessionId === userSessionId);
     const colorClass = isSelf ? 'self' : ('user-color-' + (msg.colorIndex || 0));
     
     div.className = 'message ' + colorClass;
@@ -895,6 +897,7 @@ io.on('connection', (socket) => {
       room.members.push({ id: socket.id, sessionId, nickname, colorIndex });
       isNewJoin = true;
     } else {
+      // 再入室時は socket.id と ニックネームを最新状態に更新
       existingMember.id = socket.id;
       existingMember.nickname = nickname;
     }
@@ -985,17 +988,25 @@ io.on('connection', (socket) => {
   });
 
   // メッセージ送信（テキストは暗号文のまま配られます）
-  socket.on('send_message', ({ msgId, roomId, text, image }) => {
+  socket.on('send_message', ({ msgId, roomId, sessionId, text, image }) => {
     const room = rooms[roomId];
     if (!room) return;
-    const sender = room.members.find(m => m.id === socket.id);
+
+    // socket.id または sessionId から送信者を特定
+    let sender = room.members.find(m => m.id === socket.id || m.sessionId === sessionId);
+
+    // 万が一ソケットが外れていた場合の補正処理
+    if (sender && sender.id !== socket.id) {
+      sender.id = socket.id;
+      socket.join(roomId);
+    }
 
     room.lastActivityAt = Date.now();
 
     const messageData = {
       type: 'user',
       id: msgId || Math.random().toString(36).substring(2, 10),
-      senderId: socket.id,
+      sessionId: sessionId,
       senderName: sender ? sender.nickname : '匿名',
       colorIndex: sender ? sender.colorIndex : 0,
       text, // ※ブラウザ側で暗号化された暗号文
@@ -1007,11 +1018,11 @@ io.on('connection', (socket) => {
   });
 
   // メッセージ削除処理
-  socket.on('delete_message', ({ roomId, msgId }) => {
+  socket.on('delete_message', ({ roomId, msgId, sessionId }) => {
     const room = rooms[roomId];
     if (room) {
       const targetMsg = room.messages.find(m => m.id === msgId);
-      if (targetMsg && targetMsg.senderId === socket.id) {
+      if (targetMsg && targetMsg.sessionId === sessionId) {
         room.messages = room.messages.filter(m => m.id !== msgId);
         io.to(roomId).emit('message_deleted', { msgId });
       }
