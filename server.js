@@ -7,49 +7,92 @@ const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { maxHttpBufferSize: 1e7 });
+const io = new Server(server);
 
-// --- 画像の保存先設定 (uploads フォルダ) ---
-const uploadDir = path.join(__dirname, 'uploads');
+const PORT = process.env.PORT || 3000;
+
+// アップロード用フォルダの作成
+const uploadDir = path.join(__dirname, 'public', 'uploads');
 if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir);
+  fs.mkdirSync(uploadDir, { recursive: true });
 }
 
+// Multer設定（画像アップロード）
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
+  destination: (req, file, cb) => {
+    cb(null, uploadDir);
+  },
   filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     const ext = path.extname(file.originalname);
-    const uniqueName = Date.now() + '-' + Math.round(Math.random() * 1E9) + ext;
-    cb(null, uniqueName);
+    cb(null, uniqueSuffix + ext);
   }
 });
-const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB上限
+const upload = multer({ storage });
 
-// 静的ファイルとしてアップロード画像を公開
-app.use('/uploads', express.static(uploadDir));
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());
 
-// --- 部屋データ管理 ---
-const rooms = {};
+// 部屋の状態管理（最後の発話日時を記録）
+let roomData = {
+  lastActivity: Date.now(),
+  isDeleted: false
+};
 
-// --- 画像アップロード API ---
+// 1ヶ月（30日）無発話時の自動部屋削除タイマー（1時間毎にチェック）
+const ONE_MONTH_MS = 30 * 24 * 60 * 60 * 1000;
+setInterval(() => {
+  if (!roomData.isDeleted && (Date.now() - roomData.lastActivity > ONE_MONTH_MS)) {
+    deleteRoomData("1ヶ月間発話がなかったため自動削除されました");
+  }
+}, 60 * 60 * 1000);
+
+// 部屋および関連ファイルの完全削除関数
+function deleteRoomData(reason) {
+  roomData.isDeleted = true;
+  
+  // アップロードフォルダ内のファイルを全削除
+  fs.readdir(uploadDir, (err, files) => {
+    if (!err && files) {
+      for (const file of files) {
+        fs.unlink(path.join(uploadDir, file), () => {});
+      }
+    }
+  });
+
+  // 全クライアントへ部屋削除を通知
+  io.emit('roomDeleted', { reason: reason });
+  console.log(`[部屋削除] ${reason}`);
+}
+
+// 画像アップロードAPI
 app.post('/api/upload', upload.single('image'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'ファイルがありません' });
+  if (roomData.isDeleted) {
+    return res.status(400).json({ error: '部屋は既に削除されています。' });
+  }
+  if (!req.file) {
+    return res.status(400).json({ error: 'ファイルが選択されていません。' });
+  }
 
-  const imageUrl = '/uploads/' + req.file.filename;
+  // 最終アクティビティ更新
+  roomData.lastActivity = Date.now();
+
+  const imageUrl = `/uploads/${req.file.filename}`;
   const filePath = req.file.path;
 
-  // 1時間後に自動削除
+  // 1時間後にサーバー上のオリジナル画像ファイルを物理削除
   setTimeout(() => {
     fs.unlink(filePath, (err) => {
-      if (err) console.error('画像自動削除エラー:', err);
-      else console.log('1時間経過のため画像を自動削除しました:', req.file.filename);
+      if (!err) {
+        console.log(`1時間経過のためサーバー画像ファイルを削除しました: ${req.file.filename}`);
+      }
     });
   }, 60 * 60 * 1000);
 
   res.json({ imageUrl });
 });
 
-// --- 単一ファイルWebページ配信 ---
+// ルーティング
 app.get('/', (req, res) => {
   res.send(`
 <!DOCTYPE html>
@@ -57,778 +100,286 @@ app.get('/', (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="robots" content="noindex, nofollow">
-  <title>SimpleChatee - Anonymous Chat</title>
-  <!-- 暗号化用ライブラリ CryptoJS (AES暗号化) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+  <title>匿名チャットアプリ Ver. 1.1.5</title>
   <style>
-    :root {
-      --bg-color: #0f172a;
-      --card-bg: #1e293b;
-      --accent-color: #38bdf8;
-      --text-color: #f8fafc;
-      --text-muted: #94a3b8;
-      --border-color: #334155;
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f4f5f7; display: flex; justify-content: center; height: 100vh; }
+    .chat-container { width: 100%; max-width: 600px; background: #fff; display: flex; flex-direction: column; height: 100vh; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+    .header { background: #4f46e5; color: white; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { font-size: 16px; font-weight: bold; }
+    .header-actions { display: flex; align-items: center; gap: 8px; }
+    .header .version { font-size: 11px; opacity: 0.8; }
+    .btn-delete-room { background: #ef4444; color: white; border: none; padding: 4px 8px; font-size: 11px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+    .messages-list { flex: 1; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+    .message-item { display: flex; flex-direction: column; max-width: 80%; }
+    .message-item.self { align-self: flex-end; align-items: flex-end; }
+    .message-item.other { align-self: flex-start; align-items: flex-start; }
+    .message-bubble { padding: 10px 14px; border-radius: 12px; font-size: 14px; word-break: break-all; }
+    .message-item.self .message-bubble { background: #4f46e5; color: white; border-bottom-right-radius: 2px; }
+    .message-item.other .message-bubble { background: #e5e7eb; color: #1f2937; border-bottom-left-radius: 2px; }
+    
+    /* 通常時画像表示 */
+    .chat-img {
+      max-width: 100%;
+      max-height: 200px;
+      border-radius: 8px;
+      margin-top: 6px;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-drag: none;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background-color: var(--bg-color); color: var(--text-color); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 10px; }
-    
-    .container { width: 100%; max-width: 500px; background: var(--card-bg); border-radius: 16px; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; height: 90vh; position: relative; }
-    
-    /* 3段ヘッダーレイアウト */
-    .header { padding: 10px 14px; border-bottom: 1px solid var(--border-color); background: #111827; display: flex; flex-direction: column; gap: 6px; }
-    .header-row { display: flex; justify-content: space-between; align-items: center; width: 100%; white-space: nowrap; }
-    
-    .header .room-name { color: var(--accent-color); font-weight: bold; cursor: pointer; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; font-size: 1.05rem; }
-    .header-sub-info { font-size: 0.75rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-    .header-copy-btn { background: #334155; color: #f8fafc; border: none; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-size: 0.7rem; line-height: 1.2; flex-shrink: 0; margin: 0; }
-    .header-copy-btn:hover { background: #475569; }
 
-    .version-tag { font-size: 0.65rem; color: #64748b; flex-shrink: 0; }
-    
-    /* ボタンエリア（退室・削除） */
-    .btn-action-group { display: flex; gap: 8px; width: 100%; }
-    .btn-leave { background: #64748b; color: white; border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: bold; flex: 1; text-align: center; line-height: 1.2; }
-    .btn-leave:hover { background: #475569; }
-    .btn-leave .sub-text { font-size: 0.6rem; font-weight: normal; opacity: 0.85; display: block; margin-top: 2px; }
+    /* 1時間経過後：管理者専用50px拡大サムネイル表示領域 */
+    .expired-admin-thumb-wrapper {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 6px;
+      background-color: #f3f4f6;
+      border: 1px dashed #9ca3af;
+      border-radius: 8px;
+    }
+    .expired-badge {
+      display: block;
+      font-size: 10px;
+      color: #6b7280;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+    .chat-img-expired-stretched {
+      width: 120px;
+      height: auto;
+      border-radius: 4px;
+      display: block;
+      image-rendering: pixelated;
+      opacity: 0.85;
+    }
 
-    .btn-delete-room { background: #ef4444; color: white; border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: bold; line-height: 1.2; white-space: nowrap; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
-    .btn-delete-room:hover { background: #dc2626; }
+    /* 1時間経過後：ゲスト用テキストプレースホルダー */
+    .expired-placeholder {
+      font-size: 12px;
+      color: #6b7280;
+      background-color: #f9fafb;
+      border: 1px solid #e5e7eb;
+      padding: 8px 12px;
+      border-radius: 6px;
+      margin-top: 6px;
+      display: inline-block;
+    }
 
-    .view { display: none; padding: 20px; flex-direction: column; height: 100%; overflow-y: auto; }
-    .view.active { display: flex; }
-
-    label { font-size: 0.85rem; color: var(--text-muted); margin-top: 12px; display: block; }
-    input, textarea { width: 100%; padding: 12px; margin-top: 6px; border-radius: 8px; border: 1px solid var(--border-color); background: #0f172a; color: white; outline: none; }
-    input:focus, textarea:focus { border-color: var(--accent-color); }
-    textarea { resize: none; height: 44px; font-size: 0.9rem; line-height: 1.4; }
-    
-    button { width: 100%; padding: 12px; margin-top: 18px; border-radius: 8px; border: none; background: var(--accent-color); color: #0f172a; font-weight: bold; cursor: pointer; }
-    .btn-secondary { background: #475569; color: white; }
-
-    /* 参加中の部屋リスト用スタイル */
-    .my-rooms-section { margin-bottom: 20px; display: none; }
-    .my-rooms-title { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 8px; font-weight: bold; }
-    .room-card-list { display: flex; flex-direction: column; gap: 8px; }
-    .room-card { background: #0f172a; border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; transition: 0.2s; }
-    .room-card:hover { border-color: var(--accent-color); background: #172554; }
-    .room-card-info { display: flex; flex-direction: column; gap: 2px; }
-    .room-card-name { font-weight: bold; font-size: 0.95rem; color: var(--text-color); }
-    .room-card-id { font-size: 0.75rem; color: var(--text-muted); }
-
-    #chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-bottom: 10px; }
-    
-    /* 吹き出しのスタイル */
-    .message { display: flex; flex-direction: column; width: fit-content; max-width: 80%; padding: 8px 12px; border-radius: 12px; position: relative; word-break: break-word; align-self: flex-start; font-size: 0.85rem; line-height: 1.4; }
-    
-    .message.self { align-self: flex-end; background: #0284c7; color: white; }
-    .message.self .sender { color: #e0f2fe; }
-
-    .message.user-color-0 { background: #334155; color: #f8fafc; }
-    .message.user-color-1 { background: #1e3a29; color: #f8fafc; border: 1px solid #2e5d40; }
-
-    .message .sender { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px; padding-right: 20px; font-weight: bold; }
-    .message .text-content { white-space: pre-wrap; }
-    .message .del-btn { position: absolute; top: 4px; right: 8px; cursor: pointer; color: #fca5a5; font-size: 0.75rem; opacity: 0; transition: 0.2s; }
-    .message:hover .del-btn { opacity: 1; }
-
-    .system-notification { text-align: center; font-size: 0.75rem; color: var(--text-muted); margin: 4px 0; align-self: center; }
-
-    .chat-img { max-width: 100%; max-height: 200px; border-radius: 8px; margin-top: 6px; cursor: pointer; user-select: none; -webkit-user-drag: none; }
-    
-    .input-area { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--border-color); }
-    
-    .typing-indicator { font-size: 0.75rem; color: var(--text-muted); font-style: italic; min-height: 1.1rem; }
-    
-    .input-row { display: flex; gap: 8px; align-items: flex-end; }
-    .file-btn { background: #475569; color: white; padding: 12px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; margin: 0; width: auto; height: 44px; display: flex; align-items: center; justify-content: center; }
-
-    /* 安心注記メッセージのスタイル */
-    .security-disclaimer { font-size: 0.68rem; color: #94a3b8; line-height: 1.35; margin-top: 4px; padding: 0 2px; }
+    .input-area { padding: 12px; border-top: 1px solid #e5e7eb; display: flex; gap: 8px; align-items: center; }
+    .input-area input[type="text"] { flex: 1; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; outline: none; }
+    .input-area button { padding: 10px 16px; background: #4f46e5; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+    .file-label { cursor: pointer; padding: 8px 12px; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; color: #374151; }
+    #fileInput { display: none; }
   </style>
 </head>
 <body>
-
-<div class="container">
-  <div class="header">
-    <!-- 1段目: 左詰め 部屋名 / 右詰め Ver.表記 -->
-    <div class="header-row">
-      <span class="room-name" id="header-room-name" onclick="goHome()">SimpleChatee</span>
-      <span class="version-tag">Ver. 1.1.2</span>
-    </div>
-    <!-- 2段目: 部屋ID・コピー・人数を1行で水平配置 -->
-    <div class="header-row" id="header-room-id-container" style="display: none;">
-      <div class="header-sub-info">
-        <span>部屋ID: <span id="display-room-id"></span></span>
-        <button class="header-copy-btn" onclick="copyRoomLink()">🔗コピー</button>
-      </div>
-      <span id="member-count" style="font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; margin-left: auto;"></span>
-    </div>
-    <!-- 3段目: 退室・部屋削除ボタン -->
-    <div class="header-row" id="room-action-container" style="display: none;">
-      <div class="btn-action-group">
-        <button class="btn-leave" onclick="leaveRoom()">
-          退室する
-          <span class="sub-text">(同じブラウザならトップ画面からPWなしで再入室も可能)</span>
-        </button>
-        <button id="btn-delete-room" class="btn-delete-room" style="display: none;" onclick="deleteRoom()">
-          部屋を削除する
-        </button>
+  <div class="chat-container">
+    <div class="header">
+      <h1>匿名チャット</h1>
+      <div class="header-actions">
+        <span class="version">Ver. 1.1.5</span>
+        <button id="deleteRoomBtn" class="btn-delete-room" style="display:none;">部屋削除</button>
       </div>
     </div>
-  </div>
-
-  <!-- メイン画面 -->
-  <div id="view-home" class="view active">
-    <h2 style="text-align:center; margin-bottom: 20px;">SimpleChatee</h2>
-    
-    <!-- 参加中の部屋リスト -->
-    <div id="my-rooms-section" class="my-rooms-section">
-      <div class="my-rooms-title">参加中の部屋</div>
-      <div id="my-rooms-list" class="room-card-list"></div>
-    </div>
-
-    <button onclick="showView('view-create')">新しい部屋を作成</button>
-    <div style="text-align: center; margin: 15px 0; color: var(--text-muted);">- または -</div>
-    <input type="text" id="join-room-id" placeholder="部屋IDを入力">
-    <button class="btn-secondary" onclick="checkRoomJoin()">部屋に参加</button>
-  </div>
-
-  <!-- 部屋作成画面 -->
-  <div id="view-create" class="view">
-    <h3>部屋を作成</h3>
-    <label>部屋名</label>
-    <input type="text" id="create-room-name" placeholder="例: ひみつの部屋">
-    <label>共通パスワード（参加者用）</label>
-    <input type="password" id="create-password" placeholder="合言葉を入力">
-    <label>あなたのニックネーム</label>
-    <input type="text" id="create-nickname" placeholder="名無し">
-    <button onclick="createRoom()">作成して入室</button>
-    <button class="btn-secondary" style="margin-top: 10px;" onclick="goHome()">キャンセル</button>
-  </div>
-
-  <!-- 入室画面 -->
-  <div id="view-join" class="view">
-    <h3 id="join-target-room-title">部屋に入室</h3>
-    <label>あなたのニックネーム</label>
-    <input type="text" id="join-nickname" placeholder="名無し">
-    <label>パスワード</label>
-    <input type="password" id="join-password" placeholder="パスワードを入力">
-    <button onclick="joinRoom()">入室する</button>
-    <button class="btn-secondary" style="margin-top: 10px;" onclick="goHome()">トップに戻る</button>
-  </div>
-
-  <!-- チャット画面 -->
-  <div id="view-chat" class="view">
-    <div id="chat-messages"></div>
-
+    <div class="messages-list" id="messagesList"></div>
     <div class="input-area">
-      <div id="file-name-preview" style="font-size: 0.75rem; color: var(--accent-color); display: none;"></div>
-      <div id="typing-indicator" class="typing-indicator"></div>
-      <div class="input-row">
-        <label class="file-btn">
-          📷
-          <input type="file" id="file-input" accept="image/*" style="display:none;" onchange="onFileSelected(this)">
-        </label>
-        <textarea id="msg-input" placeholder="メッセージを入力..." oninput="handleTyping()" onkeydown="onKeyDown(event)"></textarea>
-        <button style="margin-top:0; width:auto; padding: 0 16px; height: 44px;" onclick="sendMessage()">送信</button>
-      </div>
-      <!-- 安心注記メッセージ -->
-      <div class="security-disclaimer">
-        🔒 チャット内容はE2E暗号化により管理者も閲覧不可です。画像は1時間以内に自動削除されます。作成された部屋は作成者が削除するまで残ります。
-      </div>
+      <label class="file-label" for="fileInput">画像選択</label>
+      <input type="file" id="fileInput" accept="image/*" />
+      <input type="text" id="messageInput" placeholder="メッセージを入力..." />
+      <button id="sendBtn">送信</button>
     </div>
   </div>
-</div>
 
-<script src="/socket.io/socket.io.js"></script>
-<script>
-  const socket = io();
-  let currentRoomId = '';
-  let currentPassword = ''; // 暗号化・解読用キー
-  let myNickname = '';
-  let userSessionId = '';
-  let selectedFile = null;
-  let isHost = false;
-  
-  let typingTimeout = null;
-  let isTyping = false;
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const messagesList = document.getElementById('messagesList');
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const fileInput = document.getElementById('fileInput');
+    const deleteRoomBtn = document.getElementById('deleteRoomBtn');
 
-  // --- 暗号化・解読関数（CryptoJS / AES） ---
-  function encryptText(plainText, key) {
-    if (!plainText) return '';
-    try {
-      return CryptoJS.AES.encrypt(plainText, key).toString();
-    } catch (e) {
-      console.error('暗号化エラー:', e);
-      return plainText;
-    }
-  }
-
-  function decryptText(cipherText, key) {
-    if (!cipherText) return '';
-    try {
-      const bytes = CryptoJS.AES.decrypt(cipherText, key);
-      const originalText = bytes.toString(CryptoJS.enc.Utf8);
-      return originalText || '(復号エラー: パスワードが一致しません)';
-    } catch (e) {
-      return '(暗号化メッセージの読み込みに失敗しました)';
-    }
-  }
-
-  function getOrCreateSessionId() {
-    let sid = localStorage.getItem('userSessionId');
-    if (!sid) {
-      sid = Math.random().toString(36).substring(2, 10);
-      localStorage.setItem('userSessionId', sid);
-    }
-    return sid;
-  }
-
-  // --- ローカルストレージ（保存用部屋リスト）の管理 ---
-  function getSavedRooms() {
-    return JSON.parse(localStorage.getItem('myJoinedRooms') || '{}');
-  }
-
-  function saveRoomToStorage(roomId, roomName, nickname, password) {
-    const rooms = getSavedRooms();
-    rooms[roomId] = { roomName, nickname, password };
-    localStorage.setItem('myJoinedRooms', JSON.stringify(rooms));
-  }
-
-  function removeRoomFromStorage(roomId) {
-    const rooms = getSavedRooms();
-    delete rooms[roomId];
-    localStorage.setItem('myJoinedRooms', JSON.stringify(rooms));
-  }
-
-  function renderSavedRoomsList() {
-    const rooms = getSavedRooms();
-    const container = document.getElementById('my-rooms-list');
-    const section = document.getElementById('my-rooms-section');
-    container.innerHTML = '';
-
-    const roomIds = Object.keys(rooms);
-    if (roomIds.length === 0) {
-      section.style.display = 'none';
-      return;
+    // 部屋作成者（管理者）判定
+    let isHost = localStorage.getItem('is_room_host') === 'true';
+    if (!localStorage.getItem('is_room_host_initialized')) {
+      isHost = true;
+      localStorage.setItem('is_room_host', 'true');
+      localStorage.setItem('is_room_host_initialized', 'true');
     }
 
-    section.style.display = 'block';
-    roomIds.forEach(id => {
-      const room = rooms[id];
-      const card = document.createElement('div');
-      card.className = 'room-card';
-      card.onclick = () => quickJoin(id, room.password, room.nickname);
-      card.innerHTML = \`
-        <div class="room-card-info">
-          <div class="room-card-name">\${escapeHtml(room.roomName)}</div>
-          <div class="room-card-id">部屋ID: \${id}</div>
-        </div>
-        <span style="font-size: 0.8rem; color: var(--accent-color);">入室 →</span>
-      \`;
-      container.appendChild(card);
-    });
-  }
-
-  window.onload = function() {
-    userSessionId = getOrCreateSessionId();
-    renderSavedRoomsList();
-
-    const urlParams = new URLSearchParams(window.location.search);
-    const urlRoomId = urlParams.get('room');
-    
-    if (urlRoomId) {
-      const savedRooms = getSavedRooms();
-      if (savedRooms[urlRoomId]) {
-        const r = savedRooms[urlRoomId];
-        quickJoin(urlRoomId, r.password, r.nickname);
-      } else {
-        initJoinView(urlRoomId);
-      }
-    }
-  };
-
-  function quickJoin(roomId, password, nickname) {
-    currentRoomId = roomId;
-    currentPassword = password;
-    myNickname = nickname || 'ゲスト';
-    socket.emit('join_room', { roomId, password, nickname: myNickname, sessionId: userSessionId }, function(res) {
-      if (res.success) {
-        saveRoomToStorage(roomId, res.roomName, myNickname, password);
-        isHost = res.isHost;
-        setupChatView(res.roomName, res.messages);
-      } else {
-        alert(res.error || '入室に失敗しました');
-        removeRoomFromStorage(roomId);
-        renderSavedRoomsList();
-        goHome();
-      }
-    });
-  }
-
-  function initJoinView(roomId) {
-    document.getElementById('join-room-id').value = roomId;
-    currentRoomId = roomId;
-
-    socket.emit('get_room_info', { roomId: roomId }, function(res) {
-      if (res.success && res.roomName) {
-        document.getElementById('join-target-room-title').innerText = '「' + res.roomName + '」に入室';
-      } else {
-        document.getElementById('join-target-room-title').innerText = '部屋に入室';
-      }
-      showView('view-join');
-    });
-  }
-
-  function showView(id) {
-    const views = document.querySelectorAll('.view');
-    views.forEach(function(v) { v.classList.remove('active'); });
-    document.getElementById(id).classList.add('active');
-  }
-
-  function goHome() {
-    window.history.pushState({}, '', window.location.pathname);
-    document.getElementById('header-room-name').innerText = 'SimpleChatee';
-    document.getElementById('header-room-id-container').style.display = 'none';
-    document.getElementById('member-count').innerText = '';
-    document.getElementById('room-action-container').style.display = 'none';
-    document.getElementById('btn-delete-room').style.display = 'none';
-    renderSavedRoomsList();
-    showView('view-home');
-  }
-
-  function createRoom() {
-    const name = document.getElementById('create-room-name').value || '無題の部屋';
-    const password = document.getElementById('create-password').value;
-    myNickname = document.getElementById('create-nickname').value || '部屋主';
-
-    if (!password) return alert('パスワードを設定してください');
-
-    currentPassword = password;
-    socket.emit('create_room', { name: name, password: password, nickname: myNickname, sessionId: userSessionId }, function(res) {
-      if (res.success) {
-        currentRoomId = res.roomId;
-        isHost = true;
-        saveRoomToStorage(currentRoomId, name, myNickname, password);
-        setupChatView(name, []);
-      }
-    });
-  }
-
-  function checkRoomJoin() {
-    const roomId = document.getElementById('join-room-id').value.trim();
-    if (!roomId) return alert('部屋IDを入力してください');
-    initJoinView(roomId);
-  }
-
-  function joinRoom() {
-    myNickname = document.getElementById('join-nickname').value || 'ゲスト';
-    const password = document.getElementById('join-password').value;
-
-    currentPassword = password;
-    socket.emit('join_room', { roomId: currentRoomId, password: password, nickname: myNickname, sessionId: userSessionId }, function(res) {
-      if (res.success) {
-        isHost = res.isHost;
-        saveRoomToStorage(currentRoomId, res.roomName, myNickname, password);
-        setupChatView(res.roomName, res.messages);
-      } else {
-        alert(res.error || '入室に失敗しました');
-      }
-    });
-  }
-
-  function leaveRoom() {
-    if (confirm('本当にこの部屋から退室しますか？\\n（トップページの保存リストから再入室可能です）')) {
-      socket.emit('leave_room', { roomId: currentRoomId, sessionId: userSessionId });
-      goHome();
-    }
-  }
-
-  function deleteRoom() {
-    if (confirm('【警告】本当にこの部屋を削除しますか？\\nこの操作を行うと部屋が消去され、参加者全員が強制退室されます。')) {
-      socket.emit('delete_room', { roomId: currentRoomId, sessionId: userSessionId }, function(res) {
-        if (res.success) {
-          alert('部屋を削除しました');
-          removeRoomFromStorage(currentRoomId);
-          goHome();
-        } else {
-          alert(res.error || '削除権限がありません');
-        }
-      });
-    }
-  }
-
-  function setupChatView(roomName, messages) {
-    document.getElementById('header-room-name').innerText = roomName;
-    document.getElementById('display-room-id').innerText = currentRoomId;
-    document.getElementById('header-room-id-container').style.display = 'flex';
-    document.getElementById('room-action-container').style.display = 'flex';
-    
-    // ホスト（作成者）のみ削除ボタンを表示
+    // 作成者の場合のみ部屋削除ボタンを表示
     if (isHost) {
-      document.getElementById('btn-delete-room').style.display = 'flex';
-    } else {
-      document.getElementById('btn-delete-room').style.display = 'none';
+      deleteRoomBtn.style.display = 'inline-block';
     }
 
-    window.history.pushState({}, '', '?room=' + currentRoomId);
-    showView('view-chat');
-
-    const container = document.getElementById('chat-messages');
-    container.innerHTML = '';
-    if (messages && messages.length > 0) {
-      messages.forEach(function(msg) {
-        if (msg.type === 'system') {
-          renderSystemNotification(msg.text);
-        } else {
-          renderSingleMessage(msg);
-        }
-      });
-    }
-  }
-
-  function copyRoomLink() {
-    const url = window.location.origin + '?room=' + currentRoomId;
-    navigator.clipboard.writeText(url).then(function() {
-      alert('部屋の招待URLをコピーしました！\\nパスワードと一緒に友達に共有してください。');
+    let mySocketId = '';
+    socket.on('connect', () => {
+      mySocketId = socket.id;
     });
-  }
 
-  function onFileSelected(input) {
-    if (input.files && input.files[0]) {
-      selectedFile = input.files[0];
-      const preview = document.getElementById('file-name-preview');
-      preview.innerText = '選択中: ' + selectedFile.name;
-      preview.style.display = 'block';
-    }
-  }
-
-  function handleTyping() {
-    if (!isTyping) {
-      isTyping = true;
-      socket.emit('typing_start', { roomId: currentRoomId });
+    // ローカルストレージのサムネイル一括削除関数（部屋削除時のみ実行）
+    function clearAdminLocalThumbnails() {
+      localStorage.removeItem('admin_thumbnails');
+      console.log('部屋削除に伴い、LocalStorage 内の確認用サムネイルをクリアしました。');
     }
 
-    clearTimeout(typingTimeout);
-    typingTimeout = setTimeout(() => {
-      stopTyping();
-    }, 2000);
-  }
-
-  function stopTyping() {
-    if (isTyping) {
-      isTyping = false;
-      socket.emit('typing_stop', { roomId: currentRoomId });
-    }
-    clearTimeout(typingTimeout);
-  }
-
-  function onKeyDown(e) {
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    if (!isMobile && e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  }
-
-  async function sendMessage() {
-    const input = document.getElementById('msg-input');
-    const text = input.value.trim();
-    let imageUrl = null;
-
-    if (!text && !selectedFile) return;
-
-    stopTyping();
-
-    if (selectedFile) {
-      const formData = new FormData();
-      formData.append('image', selectedFile);
-      try {
-        const res = await fetch('/api/upload', { method: 'POST', body: formData });
-        const data = await res.json();
-        imageUrl = data.imageUrl;
-      } catch (e) {
-        alert('画像のアップロードに失敗しました');
-        return;
+    // 手動で「部屋削除」ボタンが押された時
+    deleteRoomBtn.addEventListener('click', () => {
+      if (confirm('本当に部屋を削除しますか？すべてのメッセージと画像データが消去されます。')) {
+        socket.emit('requestDeleteRoom');
       }
-    }
-
-    // ★ ブラウザ側で部屋のパスワードを使って暗号化 ★
-    const encryptedText = text ? encryptText(text, currentPassword) : '';
-
-    socket.emit('send_message', {
-      roomId: currentRoomId,
-      text: encryptedText,
-      image: imageUrl
     });
 
-    input.value = '';
-    selectedFile = null;
-    document.getElementById('file-input').value = '';
-    document.getElementById('file-name-preview').style.display = 'none';
-  }
-
-  function deleteMessage(msgId) {
-    socket.emit('delete_message', { roomId: currentRoomId, msgId: msgId });
-  }
-
-  function renderSingleMessage(msg) {
-    const container = document.getElementById('chat-messages');
-    const div = document.createElement('div');
-    
-    const isSelf = (msg.senderId === socket.id);
-    const colorClass = isSelf ? 'self' : ('user-color-' + (msg.colorIndex || 0));
-    
-    div.className = 'message ' + colorClass;
-    div.id = 'msg-' + msg.id;
-
-    // ★ 受信時に部屋のパスワードで復号（解読） ★
-    const plainText = msg.text ? decryptText(msg.text, currentPassword) : '';
-
-    let html = '';
-    if (isSelf) {
-      html += '<span class="del-btn" onclick="deleteMessage(\\\'' + msg.id + '\\\')">✕ 削除</span>';
-    }
-    
-    html += '<div class="sender">' + escapeHtml(msg.senderName) + '</div>';
-    if (plainText) html += '<div class="text-content">' + escapeHtml(plainText) + '</div>';
-    if (msg.image) {
-      html += '<img src="' + msg.image + '" class="chat-img" onclick="openImageInNewTab(\\\'' + msg.image + '\\\')" oncontextmenu="return false;" onerror="this.alt=\\\'(送信から1時間経過のため画像は削除されました)\\\'; this.style.display=\\\'none\\\';">';
-    }
-
-    div.innerHTML = html;
-    container.appendChild(div);
-    container.scrollTop = container.scrollHeight;
-  }
-
-  function renderSystemNotification(text) {
-    const container = document.getElementById('chat-messages');
-    const div = document.createElement('div');
-    div.className = 'system-notification';
-    div.innerText = text;
-    container.appendChild(div);
-    container.scrollTop = container.scrollHeight;
-  }
-
-  socket.on('receive_message', function(msg) {
-    if (msg.type === 'system') {
-      renderSystemNotification(msg.text);
-    } else {
-      renderSingleMessage(msg);
-    }
-  });
-
-  socket.on('message_deleted', function(data) {
-    const el = document.getElementById('msg-' + data.msgId);
-    if (el) el.remove();
-  });
-
-  socket.on('update_members', function(data) {
-    document.getElementById('member-count').innerText = '(' + data.count + '/3人)';
-  });
-
-  socket.on('display_typing', function(data) {
-    const indicator = document.getElementById('typing-indicator');
-    if (data.isTyping) {
-      indicator.innerText = data.nickname + ' が入力中...';
-    } else {
-      indicator.innerText = '';
-    }
-  });
-
-  // 部屋削除イベント（他参加者への強制退出）
-  socket.on('room_deleted_by_host', function() {
-    alert('部屋主によってこの部屋は削除されました。');
-    removeRoomFromStorage(currentRoomId);
-    goHome();
-  });
-
-  function openImageInNewTab(src) {
-    window.open(src, '_blank');
-  }
-
-  function escapeHtml(str) {
-    return str.replace(/[&<>"']/g, function(m) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
+    // 部屋削除イベント受信時（手動削除、または1ヶ月無発話による自動削除）
+    socket.on('roomDeleted', (data) => {
+      // 部屋消去時にのみローカルストレージのサムネイルデータを完全消去
+      clearAdminLocalThumbnails();
+      alert('部屋が削除されました：' + (data.reason || '手動または自動期限切れ'));
+      location.reload();
     });
-  }
-</script>
+
+    // 50px幅のミニサムネイルをLocalStorageへ保存
+    function saveAdminMiniThumbnail(messageId, file) {
+      if (!isHost) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+
+          const targetWidth = 50;
+          const scale = targetWidth / img.width;
+          canvas.width = targetWidth;
+          canvas.height = img.height * scale;
+
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const miniBase64 = canvas.toDataURL('image/jpeg', 0.5);
+
+          const thumbnails = JSON.parse(localStorage.getItem('admin_thumbnails') || '{}');
+          thumbnails[messageId] = miniBase64;
+          localStorage.setItem('admin_thumbnails', JSON.stringify(thumbnails));
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // 画像描画HTML生成関数
+    function renderImageHTML(message) {
+      const now = new Date();
+      const createdTime = new Date(message.createdAt);
+      const isExpired = (now - createdTime) > 60 * 60 * 1000; // 1時間判定
+
+      if (!isExpired) {
+        return \`<img src="\${message.imageUrl}" class="chat-img" alt="画像" onclick="window.open('\${message.imageUrl}')" />\`;
+      }
+
+      if (isHost) {
+        const thumbnails = JSON.parse(localStorage.getItem('admin_thumbnails') || '{}');
+        const miniThumb = thumbnails[message.id];
+        if (miniThumb) {
+          return \`
+            <div class="expired-admin-thumb-wrapper">
+              <span class="expired-badge">削除済み（作成者確認用）</span>
+              <img src="\${miniThumb}" class="chat-img-expired-stretched" alt="確認用サムネ" />
+            </div>
+          \`;
+        }
+      }
+
+      return \`
+        <div class="expired-placeholder">
+          🔒 画像は有効期限（1時間）を過ぎたため削除されました
+        </div>
+      \`;
+    }
+
+    // メッセージ受信時
+    socket.on('chatMessage', (msg) => {
+      appendMessage(msg);
+    });
+
+    function appendMessage(msg) {
+      const item = document.createElement('div');
+      const isSelf = msg.senderId === mySocketId;
+      item.className = \`message-item \${isSelf ? 'self' : 'other'}\`;
+
+      let contentHTML = '';
+      if (msg.text) {
+        contentHTML += \`<div class="message-bubble">\${escapeHtml(msg.text)}</div>\`;
+      }
+      if (msg.imageUrl) {
+        contentHTML += renderImageHTML(msg);
+      }
+
+      item.innerHTML = contentHTML;
+      messagesList.appendChild(item);
+      messagesList.scrollTop = messagesList.scrollHeight;
+    }
+
+    // 送信ボタン押下時
+    sendBtn.addEventListener('click', async () => {
+      const text = messageInput.value.trim();
+      const file = fileInput.files[0];
+
+      if (!text && !file) return;
+
+      const messageId = 'msg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+      let uploadedImageUrl = null;
+
+      if (file) {
+        saveAdminMiniThumbnail(messageId, file);
+
+        const formData = new FormData();
+        formData.append('image', file);
+        try {
+          const res = await fetch('/api/upload', { method: 'POST', body: formData });
+          const data = await res.json();
+          uploadedImageUrl = data.imageUrl;
+        } catch (err) {
+          alert('画像のアップロードに失敗しました。');
+          return;
+        }
+      }
+
+      const msgData = {
+        id: messageId,
+        text: text,
+        imageUrl: uploadedImageUrl,
+        createdAt: new Date().toISOString(),
+        senderId: socket.id
+      };
+
+      socket.emit('chatMessage', msgData);
+
+      messageInput.value = '';
+      fileInput.value = '';
+    });
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+  </script>
 </body>
 </html>
   `);
 });
 
-// --- Socket.io ---
+// Socket.io 接続管理
 io.on('connection', (socket) => {
-  socket.on('get_room_info', ({ roomId }, callback) => {
-    const room = rooms[roomId];
-    if (room) {
-      callback({ success: true, roomName: room.name });
-    } else {
-      callback({ success: false });
-    }
+  socket.on('chatMessage', (msg) => {
+    roomData.lastActivity = Date.now(); // 発話があったため最終アクティビティを更新
+    io.emit('chatMessage', msg);
   });
 
-  // 部屋作成
-  socket.on('create_room', ({ name, password, nickname, sessionId }, callback) => {
-    const roomId = Math.random().toString(36).substring(2, 8);
-    
-    rooms[roomId] = {
-      name,
-      password,
-      hostSessionId: sessionId, // ホスト識別ID
-      members: [{ id: socket.id, sessionId, nickname, colorIndex: 0 }],
-      messages: []
-    };
-
-    socket.join(roomId);
-    callback({ success: true, roomId, messages: [] });
-    io.to(roomId).emit('update_members', { count: rooms[roomId].members.length });
-  });
-
-  // 部屋入室
-  socket.on('join_room', ({ roomId, password, nickname, sessionId }, callback) => {
-    const room = rooms[roomId];
-    if (!room) return callback({ success: false, error: '部屋が存在しません' });
-
-    // パスワードチェック
-    if (room.password && password !== room.password) {
-      return callback({ success: false, error: 'パスワードが正しくありません' });
-    }
-
-    const existingMember = room.members.find(m => m.sessionId === sessionId);
-
-    // 満員チェック
-    if (!existingMember && room.members.length >= 3) {
-      return callback({ success: false, error: '部屋が満員です（最大3名）' });
-    }
-
-    let isNewJoin = false;
-
-    if (!existingMember) {
-      const colorIndex = room.members.length > 1 ? 1 : 0;
-      room.members.push({ id: socket.id, sessionId, nickname, colorIndex });
-      isNewJoin = true;
-    } else {
-      existingMember.id = socket.id;
-      existingMember.nickname = nickname;
-    }
-
-    socket.join(roomId);
-
-    if (isNewJoin) {
-      const systemMsg = {
-        type: 'system',
-        text: `${nickname} が入室しました`
-      };
-      room.messages.push(systemMsg);
-      io.to(roomId).emit('receive_message', systemMsg);
-    }
-
-    const isHost = (room.hostSessionId === sessionId);
-
-    callback({ success: true, roomName: room.name, messages: room.messages, isHost });
-    io.to(roomId).emit('update_members', { count: room.members.length });
-  });
-
-  // 退室処理（部屋は消えない）
-  socket.on('leave_room', ({ roomId, sessionId }) => {
-    const room = rooms[roomId];
-    if (!room) return;
-
-    const idx = room.members.findIndex(m => m.sessionId === sessionId);
-    if (idx !== -1) {
-      const leavingUser = room.members[idx];
-      room.members.splice(idx, 1);
-      
-      const systemMsg = {
-        type: 'system',
-        text: `${leavingUser.nickname} が退室しました`
-      };
-      room.messages.push(systemMsg);
-      io.to(roomId).emit('receive_message', systemMsg);
-      io.to(roomId).emit('update_members', { count: room.members.length });
-      socket.leave(roomId);
-    }
-  });
-
-  // 部屋削除処理（ホスト専用）
-  socket.on('delete_room', ({ roomId, sessionId }, callback) => {
-    const room = rooms[roomId];
-    if (!room) return callback({ success: false, error: '部屋が存在しません' });
-
-    if (room.hostSessionId !== sessionId) {
-      return callback({ success: false, error: '部屋を削除する権限がありません' });
-    }
-
-    // 全部屋メンバーに通知
-    io.to(roomId).emit('room_deleted_by_host');
-    delete rooms[roomId];
-    callback({ success: true });
-  });
-
-  // 入力開始通知
-  socket.on('typing_start', ({ roomId }) => {
-    const room = rooms[roomId];
-    if (!room) return;
-    const sender = room.members.find(m => m.id === socket.id);
-    if (sender) {
-      socket.to(roomId).emit('display_typing', { nickname: sender.nickname, isTyping: true });
-    }
-  });
-
-  // 入力停止通知
-  socket.on('typing_stop', ({ roomId }) => {
-    socket.to(roomId).emit('display_typing', { isTyping: false });
-  });
-
-  // メッセージ送信（テキストは暗号文のまま配られます）
-  socket.on('send_message', ({ roomId, text, image }) => {
-    const room = rooms[roomId];
-    if (!room) return;
-    const sender = room.members.find(m => m.id === socket.id);
-
-    const messageData = {
-      type: 'user',
-      id: Math.random().toString(36).substring(2, 10),
-      senderId: socket.id,
-      senderName: sender ? sender.nickname : '匿名',
-      colorIndex: sender ? sender.colorIndex : 0,
-      text, // ※ブラウザ側で暗号化された暗号文
-      image
-    };
-
-    room.messages.push(messageData);
-    io.to(roomId).emit('receive_message', messageData);
-  });
-
-  // メッセージ削除処理
-  socket.on('delete_message', ({ roomId, msgId }) => {
-    const room = rooms[roomId];
-    if (room) {
-      const targetMsg = room.messages.find(m => m.id === msgId);
-      if (targetMsg && targetMsg.senderId === socket.id) {
-        room.messages = room.messages.filter(m => m.id !== msgId);
-        io.to(roomId).emit('message_deleted', { msgId });
-      }
-    }
-  });
-
-  // 切断処理
-  socket.on('disconnect', () => {
-    for (const roomId in rooms) {
-      const room = rooms[roomId];
-      const member = room.members.find(m => m.id === socket.id);
-      if (member) {
-        member.id = null;
-        break;
-      }
-    }
+  // 手動部屋削除リクエストの処理
+  socket.on('requestDeleteRoom', () => {
+    deleteRoomData("部屋作成者によって手動削除されました");
   });
 });
 
-const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server running on http://localhost:${PORT} (Ver. 1.1.5)`);
 });
