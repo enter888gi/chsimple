@@ -1,4 +1,4 @@
-const Express = require('express');
+Const Express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const multer = require('multer');
@@ -187,7 +187,7 @@ app.get('/', (req, res) => {
   <div class="header">
     <div class="header-row">
       <span class="room-name" id="header-room-name" onclick="goHome()">SimpleChatee</span>
-      <span class="version-tag">Ver. 1.2.4</span>
+      <span class="version-tag">Ver. 1.2.5</span>
     </div>
     <div class="header-row" id="header-room-id-container" style="display: none;">
       <div class="header-sub-info">
@@ -354,11 +354,7 @@ app.get('/', (req, res) => {
   function getOrCreateSessionId() {
     let sid = sessionStorage.getItem('userSessionId');
     if (!sid) {
-      sid = localStorage.getItem('userSessionId');
-      if (!sid) {
-        sid = Math.random().toString(36).substring(2, 10);
-        localStorage.setItem('userSessionId', sid);
-      }
+      sid = Math.random().toString(36).substring(2, 10);
       sessionStorage.setItem('userSessionId', sid);
     }
     return sid;
@@ -797,7 +793,8 @@ app.get('/', (req, res) => {
   }
 
   function escapeHtml(str) {
-    return str.replace(/[&<>"']/g, function(m) {
+    if (!str) return '';
+    return String(str).replace(/[&<>"']/g, function(m) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
     });
   }
