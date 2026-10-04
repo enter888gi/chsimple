@@ -187,7 +187,7 @@ app.get('/', (req, res) => {
   <div class="header">
     <div class="header-row">
       <span class="room-name" id="header-room-name" onclick="goHome()">SimpleChatee</span>
-      <span class="version-tag">Ver. 1.2.5</span>
+      <span class="version-tag">Ver. 1.2.6</span>
     </div>
     <div class="header-row" id="header-room-id-container" style="display: none;">
       <div class="header-sub-info">
@@ -616,7 +616,7 @@ app.get('/', (req, res) => {
         isHost = true;
         setHostFlag(currentRoomId);
         saveRoomToStorage(currentRoomId, name, myNickname, password);
-        setupChatView(name, [], currentRoomId);
+        setupChatView(name, res.messages, currentRoomId);
 
         if (typeof res.memberCount !== 'undefined') {
           updateMemberCount(res.memberCount);
@@ -1021,6 +1021,13 @@ io.on('connection', (socket) => {
   socket.on('create_room', ({ name, password, nickname, sessionId }, callback) => {
     const roomId = Math.random().toString(36).substring(2, 8);
 
+    // 部屋作成者自身の最初の入室アナウンスを最初から保存
+    const initialSystemMsg = {
+      type: 'system',
+      id: 'system-' + Math.random().toString(36).substring(2, 10),
+      text: `${nickname} が入室しました`
+    };
+
     rooms[roomId] = {
       name,
       password,
@@ -1033,7 +1040,7 @@ io.on('connection', (socket) => {
           colorIndex: 0
         }
       ],
-      messages: [],
+      messages: [initialSystemMsg],
       lastActivityAt: Date.now()
     };
 
@@ -1043,7 +1050,7 @@ io.on('connection', (socket) => {
     callback({
       success: true,
       roomId,
-      messages: [],
+      messages: [initialSystemMsg],
       isHost: true,
       memberCount: 1
     });
