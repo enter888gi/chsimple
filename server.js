@@ -584,13 +584,11 @@ app.get('/', (req, res) => {
       const card = document.createElement('div');
       card.className = 'room-card';
       card.onclick = () => quickJoin(id, room.password, room.nickname);
-      card.innerHTML = `
-        <div class="room-card-info">
-          <div class="room-card-name">${escapeHtml(room.roomName)}</div>
-          <div class="room-card-id">部屋ID: ${id}</div>
-        </div>
-        <span style="font-size: 0.8rem; color: var(--accent-color);">入室 →</span>
-      `;
+      card.innerHTML = '<div class="room-card-info">' +
+        '<div class="room-card-name">' + escapeHtml(room.roomName) + '</div>' +
+        '<div class="room-card-id">部屋ID: ' + id + '</div>' +
+        '</div>' +
+        '<span style="font-size: 0.8rem; color: var(--accent-color);">入室 →</span>';
       container.appendChild(card);
     });
   }
