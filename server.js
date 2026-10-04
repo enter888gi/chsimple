@@ -100,7 +100,7 @@ app.get('/', (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>匿名チャットアプリ Ver. 1.1.5</title>
+  <title>匿名チャットアプリ Ver. 1.1.4</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f4f5f7; display: flex; justify-content: center; height: 100vh; }
@@ -178,7 +178,7 @@ app.get('/', (req, res) => {
     <div class="header">
       <h1>匿名チャット</h1>
       <div class="header-actions">
-        <span class="version">Ver. 1.1.5</span>
+        <span class="version">Ver. 1.1.4</span>
         <button id="deleteRoomBtn" class="btn-delete-room" style="display:none;">部屋削除</button>
       </div>
     </div>
@@ -218,11 +218,36 @@ app.get('/', (req, res) => {
       mySocketId = socket.id;
     });
 
-    // ローカルストレージのサムネイル一括削除関数（部屋削除時のみ実行）
+    // ローカルストレージのサムネイル一括削除関数
     function clearAdminLocalThumbnails() {
       localStorage.removeItem('admin_thumbnails');
-      console.log('部屋削除に伴い、LocalStorage 内の確認用サムネイルをクリアしました。');
+      console.log('LocalStorage 内の確認用サムネイルをクリアしました。');
     }
+
+    // 24時間経過した古い個別サムネイルの自動掃除
+    function cleanupOldThumbnails() {
+      const thumbnails = JSON.parse(localStorage.getItem('admin_thumbnails') || '{}');
+      const now = Date.now();
+      const expireLimit = 24 * 60 * 60 * 1000; // 24時間
+      let updated = false;
+
+      for (const messageId in thumbnails) {
+        const parts = messageId.split('-');
+        if (parts.length >= 2) {
+          const timestamp = parseInt(parts[1]);
+          if (timestamp && (now - timestamp > expireLimit)) {
+            delete thumbnails[messageId];
+            updated = true;
+          }
+        }
+      }
+
+      if (updated) {
+        localStorage.setItem('admin_thumbnails', JSON.stringify(thumbnails));
+      }
+    }
+    // 起動時に自動掃除を実行
+    cleanupOldThumbnails();
 
     // 手動で「部屋削除」ボタンが押された時
     deleteRoomBtn.addEventListener('click', () => {
@@ -233,7 +258,7 @@ app.get('/', (req, res) => {
 
     // 部屋削除イベント受信時（手動削除、または1ヶ月無発話による自動削除）
     socket.on('roomDeleted', (data) => {
-      // 部屋消去時にのみローカルストレージのサムネイルデータを完全消去
+      // ローカルストレージのサムネイルデータを完全消去
       clearAdminLocalThumbnails();
       alert('部屋が削除されました：' + (data.reason || '手動または自動期限切れ'));
       location.reload();
@@ -381,5 +406,5 @@ io.on('connection', (socket) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT} (Ver. 1.1.5)`);
+  console.log(`Server running on http://localhost:${PORT} (Ver. 1.1.4)`);
 });
