@@ -33,13 +33,14 @@ const upload = multer({ storage });
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
-// 部屋の状態管理（最後の発話日時を記録）
+// 部屋の状態管理
+const MAX_MEMBERS = 3; // 最大参加人数
 let roomData = {
   lastActivity: Date.now(),
   isDeleted: false
 };
 
-// 1ヶ月（30日）無発話時の自動部屋削除タイマー（1時間毎にチェック）
+// 1ヶ月（30日）無発話時の自動部屋削除タイマー
 const ONE_MONTH_MS = 30 * 24 * 60 * 60 * 1000;
 setInterval(() => {
   if (!roomData.isDeleted && (Date.now() - roomData.lastActivity > ONE_MONTH_MS)) {
@@ -51,7 +52,6 @@ setInterval(() => {
 function deleteRoomData(reason) {
   roomData.isDeleted = true;
   
-  // アップロードフォルダ内のファイルを全削除
   fs.readdir(uploadDir, (err, files) => {
     if (!err && files) {
       for (const file of files) {
@@ -60,9 +60,14 @@ function deleteRoomData(reason) {
     }
   });
 
-  // 全クライアントへ部屋削除を通知
   io.emit('roomDeleted', { reason: reason });
   console.log(`[部屋削除] ${reason}`);
+}
+
+// 人数カウント変更を全員に通知する関数
+function updateMemberCount() {
+  const currentCount = io.sockets.sockets.size;
+  io.emit('memberCountUpdate', { count: currentCount, max: MAX_MEMBERS });
 }
 
 // 画像アップロードAPI
@@ -74,7 +79,6 @@ app.post('/api/upload', upload.single('image'), (req, res) => {
     return res.status(400).json({ error: 'ファイルが選択されていません。' });
   }
 
-  // 最終アクティビティ更新
   roomData.lastActivity = Date.now();
 
   const imageUrl = `/uploads/${req.file.filename}`;
@@ -100,16 +104,19 @@ app.get('/', (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>匿名チャットアプリ Ver. 1.1.5</title>
+  <title>匿名チャットアプリ Ver. 1.1.6</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f4f5f7; display: flex; justify-content: center; height: 100vh; }
-    .chat-container { width: 100%; max-width: 600px; background: #fff; display: flex; flex-direction: column; height: 100vh; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f4f5f7; display: flex; justify-content: center; height: 100vh; overflow: hidden; }
+    .chat-container { width: 100%; max-width: 600px; background: #fff; display: flex; flex-direction: column; height: 100vh; box-shadow: 0 0 10px rgba(0,0,0,0.1); position: relative; }
     .header { background: #4f46e5; color: white; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; }
+    .header-title-group { display: flex; align-items: center; gap: 8px; }
     .header h1 { font-size: 16px; font-weight: bold; }
+    .member-count { font-size: 12px; background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 12px; }
     .header-actions { display: flex; align-items: center; gap: 8px; }
     .header .version { font-size: 11px; opacity: 0.8; }
     .btn-delete-room { background: #ef4444; color: white; border: none; padding: 4px 8px; font-size: 11px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+    
     .messages-list { flex: 1; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
     .message-item { display: flex; flex-direction: column; max-width: 80%; }
     .message-item.self { align-self: flex-end; align-items: flex-end; }
@@ -118,67 +125,60 @@ app.get('/', (req, res) => {
     .message-item.self .message-bubble { background: #4f46e5; color: white; border-bottom-right-radius: 2px; }
     .message-item.other .message-bubble { background: #e5e7eb; color: #1f2937; border-bottom-left-radius: 2px; }
     
-    /* 通常時画像表示 */
-    .chat-img {
-      max-width: 100%;
-      max-height: 200px;
-      border-radius: 8px;
-      margin-top: 6px;
-      cursor: pointer;
-      user-select: none;
-      -webkit-user-drag: none;
-    }
-
-    /* 1時間経過後：管理者専用50px拡大サムネイル表示領域 */
-    .expired-admin-thumb-wrapper {
-      display: inline-block;
-      margin-top: 6px;
-      padding: 6px;
-      background-color: #f3f4f6;
-      border: 1px dashed #9ca3af;
-      border-radius: 8px;
-    }
-    .expired-badge {
-      display: block;
-      font-size: 10px;
-      color: #6b7280;
-      font-weight: bold;
-      margin-bottom: 4px;
-    }
-    .chat-img-expired-stretched {
-      width: 120px;
-      height: auto;
-      border-radius: 4px;
-      display: block;
-      image-rendering: pixelated;
-      opacity: 0.85;
-    }
-
-    /* 1時間経過後：ゲスト用テキストプレースホルダー */
-    .expired-placeholder {
-      font-size: 12px;
-      color: #6b7280;
-      background-color: #f9fafb;
-      border: 1px solid #e5e7eb;
-      padding: 8px 12px;
-      border-radius: 6px;
-      margin-top: 6px;
-      display: inline-block;
-    }
+    /* 画像表示系 */
+    .chat-img { max-width: 100%; max-height: 200px; border-radius: 8px; margin-top: 6px; cursor: pointer; user-select: none; -webkit-user-drag: none; }
+    .expired-admin-thumb-wrapper { display: inline-block; margin-top: 6px; padding: 6px; background-color: #f3f4f6; border: 1px dashed #9ca3af; border-radius: 8px; }
+    .expired-badge { display: block; font-size: 10px; color: #6b7280; font-weight: bold; margin-bottom: 4px; }
+    .chat-img-expired-stretched { width: 120px; height: auto; border-radius: 4px; display: block; image-rendering: pixelated; opacity: 0.85; }
+    .expired-placeholder { font-size: 12px; color: #6b7280; background-color: #f9fafb; border: 1px solid #e5e7eb; padding: 8px 12px; border-radius: 6px; margin-top: 6px; display: inline-block; }
 
     .input-area { padding: 12px; border-top: 1px solid #e5e7eb; display: flex; gap: 8px; align-items: center; }
     .input-area input[type="text"] { flex: 1; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; outline: none; }
     .input-area button { padding: 10px 16px; background: #4f46e5; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
     .file-label { cursor: pointer; padding: 8px 12px; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; color: #374151; }
     #fileInput { display: none; }
+
+    /* トースト通知 */
+    .toast {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(17, 24, 39, 0.9);
+      color: white;
+      padding: 14px 24px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: bold;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      z-index: 9999;
+      display: none;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    /* 満員時ロックオーバーレイ */
+    .lock-overlay {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(255,255,255,0.95);
+      z-index: 9000;
+      display: none;
+    }
   </style>
 </head>
 <body>
   <div class="chat-container">
+    <div id="lockOverlay" class="lock-overlay"></div>
+    <div id="toast" class="toast">現在満員です</div>
+
     <div class="header">
-      <h1>匿名チャット</h1>
+      <div class="header-title-group">
+        <h1>匿名チャット</h1>
+        <span id="memberCount" class="member-count">（-/3人）</span>
+      </div>
       <div class="header-actions">
-        <span class="version">Ver. 1.1.5</span>
+        <span class="version">Ver. 1.1.6</span>
         <button id="deleteRoomBtn" class="btn-delete-room" style="display:none;">部屋削除</button>
       </div>
     </div>
@@ -199,6 +199,9 @@ app.get('/', (req, res) => {
     const sendBtn = document.getElementById('sendBtn');
     const fileInput = document.getElementById('fileInput');
     const deleteRoomBtn = document.getElementById('deleteRoomBtn');
+    const memberCountSpan = document.getElementById('memberCount');
+    const toast = document.getElementById('toast');
+    const lockOverlay = document.getElementById('lockOverlay');
 
     // 部屋作成者（管理者）判定
     let isHost = localStorage.getItem('is_room_host') === 'true';
@@ -208,7 +211,6 @@ app.get('/', (req, res) => {
       localStorage.setItem('is_room_host_initialized', 'true');
     }
 
-    // 作成者の場合のみ部屋削除ボタンを表示
     if (isHost) {
       deleteRoomBtn.style.display = 'inline-block';
     }
@@ -218,28 +220,44 @@ app.get('/', (req, res) => {
       mySocketId = socket.id;
     });
 
-    // ローカルストレージのサムネイル一括削除関数（部屋削除時のみ実行）
+    // 満員による入室拒否のイベントハンドラ
+    socket.on('roomFull', (data) => {
+      // 画面を固定してチャット画面へのアクセスを遮断
+      lockOverlay.style.display = 'block';
+      toast.innerText = data.message || '現在満員です';
+      toast.style.display = 'block';
+
+      // 2秒間トースト表示後に白紙化（画面操作不能にする）
+      setTimeout(() => {
+        toast.style.display = 'none';
+        document.body.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:100vh;color:#6b7280;font-size:14px;">現在満員のため利用できません</div>';
+      }, 2000);
+    });
+
+    // 人数更新イベントの受信
+    socket.on('memberCountUpdate', (data) => {
+      memberCountSpan.innerText = \`（\${data.count}/\${data.max}人）\`;
+    });
+
+    // サムネイル一括削除関数
     function clearAdminLocalThumbnails() {
       localStorage.removeItem('admin_thumbnails');
-      console.log('部屋削除に伴い、LocalStorage 内の確認用サムネイルをクリアしました。');
     }
 
-    // 手動で「部屋削除」ボタンが押された時
+    // 部屋削除ボタン
     deleteRoomBtn.addEventListener('click', () => {
       if (confirm('本当に部屋を削除しますか？すべてのメッセージと画像データが消去されます。')) {
         socket.emit('requestDeleteRoom');
       }
     });
 
-    // 部屋削除イベント受信時（手動削除、または1ヶ月無発話による自動削除）
     socket.on('roomDeleted', (data) => {
-      // 部屋消去時にのみローカルストレージのサムネイルデータを完全消去
       clearAdminLocalThumbnails();
       alert('部屋が削除されました：' + (data.reason || '手動または自動期限切れ'));
       location.reload();
     });
 
-    // 50px幅のミニサムネイルをLocalStorageへ保存
+    // 50px幅ミニサムネイル保存
     function saveAdminMiniThumbnail(messageId, file) {
       if (!isHost) return;
       const reader = new FileReader();
@@ -266,11 +284,10 @@ app.get('/', (req, res) => {
       reader.readAsDataURL(file);
     }
 
-    // 画像描画HTML生成関数
     function renderImageHTML(message) {
       const now = new Date();
       const createdTime = new Date(message.createdAt);
-      const isExpired = (now - createdTime) > 60 * 60 * 1000; // 1時間判定
+      const isExpired = (now - createdTime) > 60 * 60 * 1000;
 
       if (!isExpired) {
         return \`<img src="\${message.imageUrl}" class="chat-img" alt="画像" onclick="window.open('\${message.imageUrl}')" />\`;
@@ -296,7 +313,6 @@ app.get('/', (req, res) => {
       \`;
     }
 
-    // メッセージ受信時
     socket.on('chatMessage', (msg) => {
       appendMessage(msg);
     });
@@ -319,7 +335,6 @@ app.get('/', (req, res) => {
       messagesList.scrollTop = messagesList.scrollHeight;
     }
 
-    // 送信ボタン押下時
     sendBtn.addEventListener('click', async () => {
       const text = messageInput.value.trim();
       const file = fileInput.files[0];
@@ -369,17 +384,31 @@ app.get('/', (req, res) => {
 
 // Socket.io 接続管理
 io.on('connection', (socket) => {
+  // 接続人数チェック（3名を超える場合は拒否）
+  if (io.sockets.sockets.size > MAX_MEMBERS) {
+    socket.emit('roomFull', { message: '現在満員です' });
+    socket.disconnect(true);
+    return;
+  }
+
+  // 人数更新を全員にbroadcast
+  updateMemberCount();
+
   socket.on('chatMessage', (msg) => {
-    roomData.lastActivity = Date.now(); // 発話があったため最終アクティビティを更新
+    roomData.lastActivity = Date.now();
     io.emit('chatMessage', msg);
   });
 
-  // 手動部屋削除リクエストの処理
   socket.on('requestDeleteRoom', () => {
     deleteRoomData("部屋作成者によって手動削除されました");
+  });
+
+  // 切断時にも人数を更新
+  socket.on('disconnect', () => {
+    updateMemberCount();
   });
 });
 
 server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT} (Ver. 1.1.5)`);
+  console.log(`Server running on http://localhost:${PORT} (Ver. 1.1.6)`);
 });
