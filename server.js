@@ -4,10 +4,101 @@ const { Server } = require('socket.io');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { Pool } = require('pg');
 
 const app = Express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e7 });
+
+// --- Supabase (PostgreSQL) 接続設定 ---
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
+
+// --- データベース初期化 ---
+async function initDb() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rooms (
+        room_id VARCHAR(50) PRIMARY KEY,
+        room_name VARCHAR(100) NOT NULL,
+        password VARCHAR(255),
+        host_session_id VARCHAR(100),
+        last_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('[DB] テーブル初期化完了');
+  } catch (err) {
+    console.error('[DB] 初期化エラー:', err);
+  }
+}
+initDb();
+
+// --- DB操作用ヘルパー関数 ---
+async function dbSaveRoom(roomId, roomName, password, hostSessionId) {
+  try {
+    const query = `
+      INSERT INTO rooms (room_id, room_name, password, host_session_id, last_activity_at)
+      VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+      ON CONFLICT (room_id) DO UPDATE 
+      SET room_name = EXCLUDED.room_name,
+          password = EXCLUDED.password,
+          host_session_id = EXCLUDED.host_session_id,
+          last_activity_at = CURRENT_TIMESTAMP;
+    `;
+    await pool.query(query, [roomId, roomName, password, hostSessionId]);
+  } catch (err) {
+    console.error('[DB] saveRoomエラー:', err);
+  }
+}
+
+async function dbGetRoom(roomId) {
+  try {
+    const res = await pool.query('SELECT * FROM rooms WHERE room_id = $1', [roomId]);
+    return res.rows[0];
+  } catch (err) {
+    console.error('[DB] getRoomエラー:', err);
+    return null;
+  }
+}
+
+async function dbDeleteRoom(roomId) {
+  try {
+    await pool.query('DELETE FROM rooms WHERE room_id = $1', [roomId]);
+  } catch (err) {
+    console.error('[DB] deleteRoomエラー:', err);
+  }
+}
+
+async function dbUpdateActivity(roomId) {
+  try {
+    await pool.query('UPDATE rooms SET last_activity_at = CURRENT_TIMESTAMP WHERE room_id = $1', [roomId]);
+  } catch (err) {
+    console.error('[DB] updateActivityエラー:', err);
+  }
+}
+
+// オンメモリに部屋情報がなければ DB から自動復元する関数
+async function restoreRoomFromDb(roomId) {
+  if (!roomId) return null;
+  if (rooms[roomId]) return rooms[roomId];
+
+  const dbRoom = await dbGetRoom(roomId);
+  if (dbRoom) {
+    rooms[roomId] = {
+      name: dbRoom.room_name,
+      password: dbRoom.password,
+      hostSessionId: dbRoom.host_session_id,
+      members: [],
+      messages: [],
+      lastActivityAt: new Date(dbRoom.last_activity_at).getTime()
+    };
+    return rooms[roomId];
+  }
+  return null;
+}
 
 // --- 画像の保存先設定 (uploads フォルダ) ---
 const uploadDir = path.join(__dirname, 'uploads');
@@ -33,7 +124,7 @@ const rooms = {};
 
 // --- 部屋の無活動クリーンアップ（30日以上無発話の部屋を自動削除） ---
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-setInterval(() => {
+setInterval(async () => {
   const now = Date.now();
   for (const roomId in rooms) {
     const room = rooms[roomId];
@@ -54,8 +145,16 @@ setInterval(() => {
         }
       });
       delete rooms[roomId];
+      await dbDeleteRoom(roomId);
       console.log(`部屋 ${roomId} は30日間無活動のため自動削除されました。`);
     }
+  }
+
+  // DB上からも30日以上の無活動部屋を一括削除
+  try {
+    await pool.query(`DELETE FROM rooms WHERE last_activity_at < NOW() - INTERVAL '30 days'`);
+  } catch (err) {
+    console.error('DBクリーンアップエラー:', err);
   }
 }, 12 * 60 * 60 * 1000); // 12時間ごとにチェック
 
@@ -485,13 +584,13 @@ app.get('/', (req, res) => {
       const card = document.createElement('div');
       card.className = 'room-card';
       card.onclick = () => quickJoin(id, room.password, room.nickname);
-      card.innerHTML = \`
+      card.innerHTML = `
         <div class="room-card-info">
-          <div class="room-card-name">\${escapeHtml(room.roomName)}</div>
-          <div class="room-card-id">部屋ID: \${id}</div>
+          <div class="room-card-name">${escapeHtml(room.roomName)}</div>
+          <div class="room-card-id">部屋ID: ${id}</div>
         </div>
         <span style="font-size: 0.8rem; color: var(--accent-color);">入室 →</span>
-      \`;
+      `;
       container.appendChild(card);
     });
   }
@@ -956,7 +1055,6 @@ io.on('connection', (socket) => {
   }
 
   // 指定ソケットへ部屋全体の状態を同期
-  // 再接続時に、切断中に受信できなかったメッセージも復元する
   function syncRoomToSocket(targetSocket, roomId) {
     const room = rooms[roomId];
     if (!room) return;
@@ -970,8 +1068,8 @@ io.on('connection', (socket) => {
     });
   }
 
-  socket.on('rejoin_room', ({ roomId, sessionId, nickname }) => {
-    const room = rooms[roomId];
+  socket.on('rejoin_room', async ({ roomId, sessionId, nickname }) => {
+    const room = await restoreRoomFromDb(roomId);
 
     if (room) {
       socket.join(roomId);
@@ -1000,6 +1098,7 @@ io.on('connection', (socket) => {
       }
 
       room.lastActivityAt = Date.now();
+      await dbUpdateActivity(roomId);
 
       // 再接続した本人へ部屋状態を完全同期
       syncRoomToSocket(socket, roomId);
@@ -1009,8 +1108,8 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('get_room_info', ({ roomId }, callback) => {
-    const room = rooms[roomId];
+  socket.on('get_room_info', async ({ roomId }, callback) => {
+    const room = await restoreRoomFromDb(roomId);
 
     callback({
       success: !!room,
@@ -1018,7 +1117,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('create_room', ({ name, password, nickname, sessionId }, callback) => {
+  socket.on('create_room', async ({ name, password, nickname, sessionId }, callback) => {
     const roomId = Math.random().toString(36).substring(2, 8);
 
     // 部屋作成者自身の最初の入室アナウンスを最初から保存
@@ -1044,6 +1143,9 @@ io.on('connection', (socket) => {
       lastActivityAt: Date.now()
     };
 
+    // Supabase DB へ保存
+    await dbSaveRoom(roomId, name, password, sessionId);
+
     socket.join(roomId);
     setSocketSession(roomId, sessionId);
 
@@ -1058,8 +1160,8 @@ io.on('connection', (socket) => {
     emitMemberCount(roomId);
   });
 
-  socket.on('join_room', ({ roomId, password, nickname, sessionId }, callback) => {
-    const room = rooms[roomId];
+  socket.on('join_room', async ({ roomId, password, nickname, sessionId }, callback) => {
+    const room = await restoreRoomFromDb(roomId);
 
     if (!room) {
       return callback({
@@ -1111,6 +1213,7 @@ io.on('connection', (socket) => {
     }
 
     room.lastActivityAt = Date.now();
+    await dbUpdateActivity(roomId);
 
     socket.join(roomId);
     setSocketSession(roomId, sessionId);
@@ -1135,9 +1238,6 @@ io.on('connection', (socket) => {
       memberCount: activeCount
     });
 
-    // 画面初期化(setupChatView)後に全員へリアルタイム通知
-    // 再接続(rejoin_room)ではこの処理を行わないため、
-    // 一時的なSocket.IO再接続では「入室しました」を増やさない
     setTimeout(() => {
       if (rooms[roomId]) {
         io.to(roomId).emit('receive_message', systemMsg);
@@ -1162,6 +1262,7 @@ io.on('connection', (socket) => {
       member.id = null;
 
       room.lastActivityAt = Date.now();
+      dbUpdateActivity(targetRoomId);
 
       const systemMsg = {
         type: 'system',
@@ -1171,22 +1272,17 @@ io.on('connection', (socket) => {
 
       room.messages.push(systemMsg);
 
-      // 退室通知を部屋へ即時送信
       io.to(targetRoomId).emit('receive_message', systemMsg);
-
-      // 人数をサーバー状態から再計算して即時同期
       emitMemberCount(targetRoomId);
 
       socket.leave(targetRoomId);
-
-      // このソケットが以前の部屋へ誤って再接続しないよう状態を解除
       socket.data.roomId = null;
     }
   });
 
-  socket.on('delete_room', ({ roomId }, callback) => {
+  socket.on('delete_room', async ({ roomId }, callback) => {
     const targetRoomId = roomId || socket.data.roomId;
-    const room = rooms[targetRoomId];
+    const room = await restoreRoomFromDb(targetRoomId);
 
     if (!room) {
       return callback({
@@ -1217,6 +1313,7 @@ io.on('connection', (socket) => {
     io.to(targetRoomId).emit('room_deleted_by_host');
 
     delete rooms[targetRoomId];
+    await dbDeleteRoom(targetRoomId);
 
     callback({
       success: true
@@ -1249,9 +1346,9 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('send_message', ({ msgId, roomId, text, image }) => {
+  socket.on('send_message', async ({ msgId, roomId, text, image }) => {
     const targetRoomId = roomId || socket.data.roomId;
-    const room = rooms[targetRoomId];
+    const room = await restoreRoomFromDb(targetRoomId);
 
     if (!room) return;
 
@@ -1265,11 +1362,11 @@ io.on('connection', (socket) => {
       sender.id = socket.id;
 
       socket.join(targetRoomId);
-
       setSocketSession(targetRoomId, sessionId);
     }
 
     room.lastActivityAt = Date.now();
+    await dbUpdateActivity(targetRoomId);
 
     const messageData = {
       type: 'user',
@@ -1283,7 +1380,6 @@ io.on('connection', (socket) => {
 
     room.messages.push(messageData);
 
-    // テキスト・画像ともに部屋全員へリアルタイム送信
     io.to(targetRoomId).emit('receive_message', messageData);
   });
 
@@ -1296,7 +1392,6 @@ io.on('connection', (socket) => {
         m => m.id === msgId
       );
 
-      // 送信者本人のセッションであるか検証して削除
       if (
         targetMsg &&
         targetMsg.sessionId === socket.data.sessionId
@@ -1318,15 +1413,12 @@ io.on('connection', (socket) => {
     if (roomId && rooms[roomId]) {
       const room = rooms[roomId];
 
-      // このsocket自身に紐付いているメンバーだけを非アクティブ化
       const member = room.members.find(
         m => m.id === socket.id
       );
 
       if (member) {
         member.id = null;
-
-        // 切断後の人数を即時同期
         emitMemberCount(roomId);
       }
     }
