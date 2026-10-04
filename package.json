@@ -1,14 +1,14 @@
 {
-  "name": "chatalya-app",
-  "version": "1.0.0",
-  "description": "Anonymous Chat App",
+  "name": "chsimple",
+  "version": "1.2.8",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.19.2",
+    "express": "^4.18.2",
     "multer": "^1.4.5-lts.1",
-    "socket.io": "^4.7.5"
+    "pg": "^8.11.3",
+    "socket.io": "^4.7.2"
   }
 }
