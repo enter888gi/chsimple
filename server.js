@@ -10,7 +10,7 @@ const { Pool } = require('pg');
 const app = Express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e7 });
-
+ 
 // --- PostgreSQL 永続DB ---
 if (!process.env.DATABASE_URL) {
   console.error('DATABASE_URL が設定されていません。');
