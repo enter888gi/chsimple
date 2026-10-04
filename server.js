@@ -187,7 +187,7 @@ app.get('/', (req, res) => {
   <div class="header">
     <div class="header-row">
       <span class="room-name" id="header-room-name" onclick="goHome()">SimpleChatee</span>
-      <span class="version-tag">Ver. 1.2.6</span>
+      <span class="version-tag">Ver. 1.2.7</span>
     </div>
     <div class="header-row" id="header-room-id-container" style="display: none;">
       <div class="header-sub-info">
@@ -1094,8 +1094,6 @@ io.on('connection', (socket) => {
       });
     }
 
-    let isNewJoin = false;
-
     if (!existingMember) {
       const colorIndex = room.members.length > 0
         ? (room.members.length % 2)
@@ -1107,8 +1105,6 @@ io.on('connection', (socket) => {
         nickname,
         colorIndex
       });
-
-      isNewJoin = true;
     } else {
       existingMember.id = socket.id;
       existingMember.nickname = nickname;
@@ -1119,18 +1115,14 @@ io.on('connection', (socket) => {
     socket.join(roomId);
     setSocketSession(roomId, sessionId);
 
-    if (isNewJoin) {
-      const systemMsg = {
-        type: 'system',
-        id: 'system-' + Math.random().toString(36).substring(2, 10),
-        text: `${nickname} が入室しました`
-      };
+    // 新規入室・明示的な再入室のどちらでも入室通知を作成して保存
+    const systemMsg = {
+      type: 'system',
+      id: 'system-' + Math.random().toString(36).substring(2, 10),
+      text: `${nickname} が入室しました`
+    };
 
-      room.messages.push(systemMsg);
-
-      // 現在部屋にいる全員へ即時通知
-      io.to(roomId).emit('receive_message', systemMsg);
-    }
+    room.messages.push(systemMsg);
 
     const isHost = (room.hostSessionId === sessionId);
     const activeCount = getActiveMemberCount(room);
@@ -1143,8 +1135,15 @@ io.on('connection', (socket) => {
       memberCount: activeCount
     });
 
-    // 部屋全員へ最新人数を即時同期
-    emitMemberCount(roomId);
+    // 画面初期化(setupChatView)後に全員へリアルタイム通知
+    // 再接続(rejoin_room)ではこの処理を行わないため、
+    // 一時的なSocket.IO再接続では「入室しました」を増やさない
+    setTimeout(() => {
+      if (rooms[roomId]) {
+        io.to(roomId).emit('receive_message', systemMsg);
+        emitMemberCount(roomId);
+      }
+    }, 0);
   });
 
   socket.on('leave_room', ({ roomId }) => {
