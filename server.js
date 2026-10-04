@@ -283,7 +283,54 @@ app.get('/', (req, res) => {
   let typingTimeout = null;
   let isTyping = false;
 
-  // 暗号化関数
+  // --- Socket.io 受信イベントリスナーを最上位で登録 ---
+  socket.on('connect', function() {
+    if (currentRoomId) {
+      socket.emit('rejoin_room', { roomId: currentRoomId, sessionId: userSessionId, nickname: myNickname });
+    }
+  });
+
+  socket.on('receive_message', function(msg) {
+    if (msg.type === 'system') {
+      renderSystemNotification(msg.text);
+    } else {
+      renderSingleMessage(msg);
+    }
+  });
+
+  socket.on('message_deleted', function(data) {
+    const el = document.getElementById('msg-' + data.msgId);
+    if (el) el.remove();
+  });
+
+  socket.on('update_members', function(data) {
+    document.getElementById('member-count').innerText = '(' + data.count + '/3人)';
+  });
+
+  socket.on('display_typing', function(data) {
+    const indicator = document.getElementById('typing-indicator');
+    if (data.isTyping) {
+      indicator.innerText = data.nickname + ' が入力中...';
+    } else {
+      indicator.innerText = '';
+    }
+  });
+
+  socket.on('room_deleted_by_host', function(data) {
+    if (data && data.reason === 'inactivity') {
+      alert('1ヶ月間無発話のため、部屋は自動削除されました。');
+    } else {
+      alert('部屋主によってこの部屋は削除されました。');
+    }
+    removeRoomFromStorage(currentRoomId);
+    goHome();
+  });
+
+  socket.on('room_full_rejected', function() {
+    showToast('現在満員です', function() { goHome(); });
+  });
+
+  // --- ユーティリティ・暗号化関数 ---
   function encryptText(plainText, key) {
     if (!plainText) return '';
     try {
@@ -424,13 +471,6 @@ app.get('/', (req, res) => {
       }
     }
   };
-
-  // ネットワーク再接続時に即時ルームへ復帰・同期する仕組み
-  socket.on('connect', () => {
-    if (currentRoomId) {
-      socket.emit('rejoin_room', { roomId: currentRoomId, sessionId: userSessionId, nickname: myNickname });
-    }
-  });
 
   function showToast(message, callback) {
     const overlay = document.getElementById('full-overlay');
@@ -752,46 +792,6 @@ app.get('/', (req, res) => {
     container.scrollTop = container.scrollHeight;
   }
 
-  socket.on('receive_message', function(msg) {
-    if (msg.type === 'system') {
-      renderSystemNotification(msg.text);
-    } else {
-      renderSingleMessage(msg);
-    }
-  });
-
-  socket.on('message_deleted', function(data) {
-    const el = document.getElementById('msg-' + data.msgId);
-    if (el) el.remove();
-  });
-
-  socket.on('update_members', function(data) {
-    document.getElementById('member-count').innerText = '(' + data.count + '/3人)';
-  });
-
-  socket.on('display_typing', function(data) {
-    const indicator = document.getElementById('typing-indicator');
-    if (data.isTyping) {
-      indicator.innerText = data.nickname + ' が入力中...';
-    } else {
-      indicator.innerText = '';
-    }
-  });
-
-  socket.on('room_deleted_by_host', function(data) {
-    if (data && data.reason === 'inactivity') {
-      alert('1ヶ月間無発話のため、部屋は自動削除されました。');
-    } else {
-      alert('部屋主によってこの部屋は削除されました。');
-    }
-    removeRoomFromStorage(currentRoomId);
-    goHome();
-  });
-
-  socket.on('room_full_rejected', function() {
-    showToast('現在満員です', () => { goHome(); });
-  });
-
   function openImageInNewTab(src) {
     window.open(src, '_blank');
   }
@@ -930,7 +930,7 @@ io.on('connection', (socket) => {
     const room = rooms[targetRoomId];
     if (!room) return callback({ success: false, error: '部屋が存在しません' });
 
-    // サーバー上のソケットデータからホスト権限を厳格判定（クライアント偽装を遮断）
+    // サーバー上のソケットデータからホスト権限を厳格判定
     if (room.hostSessionId !== socket.data.sessionId) {
       return callback({ success: false, error: '部屋を削除する権限がありません' });
     }
