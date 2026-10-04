@@ -33,61 +33,24 @@ const upload = multer({ storage });
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
-// 部屋の状態管理（最後の発話日時を記録）
-let roomData = {
-  lastActivity: Date.now(),
-  isDeleted: false
-};
-
-// 1ヶ月（30日）無発話時の自動部屋削除タイマー（1時間毎にチェック）
-const ONE_MONTH_MS = 30 * 24 * 60 * 60 * 1000;
-setInterval(() => {
-  if (!roomData.isDeleted && (Date.now() - roomData.lastActivity > ONE_MONTH_MS)) {
-    deleteRoomData("1ヶ月間発話がなかったため自動削除されました");
-  }
-}, 60 * 60 * 1000);
-
-// 部屋および関連ファイルの完全削除関数
-function deleteRoomData(reason) {
-  roomData.isDeleted = true;
-  
-  // アップロードフォルダ内のファイルを全削除
-  fs.readdir(uploadDir, (err, files) => {
-    if (!err && files) {
-      for (const file of files) {
-        fs.unlink(path.join(uploadDir, file), () => {});
-      }
-    }
-  });
-
-  // 全クライアントへ部屋削除を通知
-  io.emit('roomDeleted', { reason: reason });
-  console.log(`[部屋削除] ${reason}`);
-}
-
 // 画像アップロードAPI
 app.post('/api/upload', upload.single('image'), (req, res) => {
-  if (roomData.isDeleted) {
-    return res.status(400).json({ error: '部屋は既に削除されています。' });
-  }
   if (!req.file) {
     return res.status(400).json({ error: 'ファイルが選択されていません。' });
   }
-
-  // 最終アクティビティ更新
-  roomData.lastActivity = Date.now();
-
   const imageUrl = `/uploads/${req.file.filename}`;
   const filePath = req.file.path;
 
-  // 1時間後にサーバー上のオリジナル画像ファイルを物理削除
+  // 1時間後にサーバー上の画像ファイルを物理削除
   setTimeout(() => {
     fs.unlink(filePath, (err) => {
-      if (!err) {
-        console.log(`1時間経過のためサーバー画像ファイルを削除しました: ${req.file.filename}`);
+      if (err) {
+        console.error(`ファイル削除エラー (${req.file.filename}):`, err);
+      } else {
+        console.log(`1時間経過のため画像ファイルを削除しました: ${req.file.filename}`);
       }
     });
-  }, 60 * 60 * 1000);
+  }, 60 * 60 * 1000); // 1時間 (3600,000ms)
 
   res.json({ imageUrl });
 });
@@ -100,16 +63,14 @@ app.get('/', (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>匿名チャットアプリ Ver. 1.1.4</title>
+  <title>匿名チャットアプリ Ver. 1.1.3</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f4f5f7; display: flex; justify-content: center; height: 100vh; }
     .chat-container { width: 100%; max-width: 600px; background: #fff; display: flex; flex-direction: column; height: 100vh; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
     .header { background: #4f46e5; color: white; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; }
     .header h1 { font-size: 16px; font-weight: bold; }
-    .header-actions { display: flex; align-items: center; gap: 8px; }
     .header .version { font-size: 11px; opacity: 0.8; }
-    .btn-delete-room { background: #ef4444; color: white; border: none; padding: 4px 8px; font-size: 11px; border-radius: 4px; cursor: pointer; font-weight: bold; }
     .messages-list { flex: 1; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
     .message-item { display: flex; flex-direction: column; max-width: 80%; }
     .message-item.self { align-self: flex-end; align-items: flex-end; }
@@ -150,7 +111,7 @@ app.get('/', (req, res) => {
       height: auto;
       border-radius: 4px;
       display: block;
-      image-rendering: pixelated;
+      image-rendering: pixelated; /* ドット感を活かして輪郭を捉えやすく拡大 */
       opacity: 0.85;
     }
 
@@ -177,10 +138,7 @@ app.get('/', (req, res) => {
   <div class="chat-container">
     <div class="header">
       <h1>匿名チャット</h1>
-      <div class="header-actions">
-        <span class="version">Ver. 1.1.4</span>
-        <button id="deleteRoomBtn" class="btn-delete-room" style="display:none;">部屋削除</button>
-      </div>
+      <span class="version">Ver. 1.1.3</span>
     </div>
     <div class="messages-list" id="messagesList"></div>
     <div class="input-area">
@@ -198,73 +156,23 @@ app.get('/', (req, res) => {
     const messageInput = document.getElementById('messageInput');
     const sendBtn = document.getElementById('sendBtn');
     const fileInput = document.getElementById('fileInput');
-    const deleteRoomBtn = document.getElementById('deleteRoomBtn');
 
-    // 部屋作成者（管理者）判定
+    // 部屋作成者（管理者）判定フラグの初期化
     let isHost = localStorage.getItem('is_room_host') === 'true';
     if (!localStorage.getItem('is_room_host_initialized')) {
+      // 初回訪問者を管理者（ホスト）として定義（必要に応じて仕様を調整可能）
       isHost = true;
       localStorage.setItem('is_room_host', 'true');
       localStorage.setItem('is_room_host_initialized', 'true');
     }
 
-    // 作成者の場合のみ部屋削除ボタンを表示
-    if (isHost) {
-      deleteRoomBtn.style.display = 'inline-block';
-    }
-
+    // ユーザー識別用ソケットID
     let mySocketId = '';
     socket.on('connect', () => {
       mySocketId = socket.id;
     });
 
-    // ローカルストレージのサムネイル一括削除関数
-    function clearAdminLocalThumbnails() {
-      localStorage.removeItem('admin_thumbnails');
-      console.log('LocalStorage 内の確認用サムネイルをクリアしました。');
-    }
-
-    // 24時間経過した古い個別サムネイルの自動掃除
-    function cleanupOldThumbnails() {
-      const thumbnails = JSON.parse(localStorage.getItem('admin_thumbnails') || '{}');
-      const now = Date.now();
-      const expireLimit = 24 * 60 * 60 * 1000; // 24時間
-      let updated = false;
-
-      for (const messageId in thumbnails) {
-        const parts = messageId.split('-');
-        if (parts.length >= 2) {
-          const timestamp = parseInt(parts[1]);
-          if (timestamp && (now - timestamp > expireLimit)) {
-            delete thumbnails[messageId];
-            updated = true;
-          }
-        }
-      }
-
-      if (updated) {
-        localStorage.setItem('admin_thumbnails', JSON.stringify(thumbnails));
-      }
-    }
-    // 起動時に自動掃除を実行
-    cleanupOldThumbnails();
-
-    // 手動で「部屋削除」ボタンが押された時
-    deleteRoomBtn.addEventListener('click', () => {
-      if (confirm('本当に部屋を削除しますか？すべてのメッセージと画像データが消去されます。')) {
-        socket.emit('requestDeleteRoom');
-      }
-    });
-
-    // 部屋削除イベント受信時（手動削除、または1ヶ月無発話による自動削除）
-    socket.on('roomDeleted', (data) => {
-      // ローカルストレージのサムネイルデータを完全消去
-      clearAdminLocalThumbnails();
-      alert('部屋が削除されました：' + (data.reason || '手動または自動期限切れ'));
-      location.reload();
-    });
-
-    // 50px幅のミニサムネイルをLocalStorageへ保存
+    // 投稿時に50px幅の超軽量ミニサムネイルをLocalStorageに記録（管理者端末専用）
     function saveAdminMiniThumbnail(messageId, file) {
       if (!isHost) return;
       const reader = new FileReader();
@@ -297,10 +205,12 @@ app.get('/', (req, res) => {
       const createdTime = new Date(message.createdAt);
       const isExpired = (now - createdTime) > 60 * 60 * 1000; // 1時間判定
 
+      // 1時間以内：全員共通で通常表示 (max-height: 200px)
       if (!isExpired) {
         return \`<img src="\${message.imageUrl}" class="chat-img" alt="画像" onclick="window.open('\${message.imageUrl}')" />\`;
       }
 
+      // 1時間経過後：部屋作成者の場合かつ50pxサムネが存在する場合
       if (isHost) {
         const thumbnails = JSON.parse(localStorage.getItem('admin_thumbnails') || '{}');
         const miniThumb = thumbnails[message.id];
@@ -314,6 +224,7 @@ app.get('/', (req, res) => {
         }
       }
 
+      // 1時間経過後：ゲストまたはサムネイル無しの場合
       return \`
         <div class="expired-placeholder">
           🔒 画像は有効期限（1時間）を過ぎたため削除されました
@@ -321,7 +232,7 @@ app.get('/', (req, res) => {
       \`;
     }
 
-    // メッセージ受信時
+    // メッセージレンダリング
     socket.on('chatMessage', (msg) => {
       appendMessage(msg);
     });
@@ -344,7 +255,7 @@ app.get('/', (req, res) => {
       messagesList.scrollTop = messagesList.scrollHeight;
     }
 
-    // 送信ボタン押下時
+    // メッセージ＆画像送信処理
     sendBtn.addEventListener('click', async () => {
       const text = messageInput.value.trim();
       const file = fileInput.files[0];
@@ -355,6 +266,7 @@ app.get('/', (req, res) => {
       let uploadedImageUrl = null;
 
       if (file) {
+        // 管理者端末の場合、送信時に50pxサムネイルをローカルに即時保管
         saveAdminMiniThumbnail(messageId, file);
 
         const formData = new FormData();
@@ -379,6 +291,7 @@ app.get('/', (req, res) => {
 
       socket.emit('chatMessage', msgData);
 
+      // 入力初期化
       messageInput.value = '';
       fileInput.value = '';
     });
@@ -386,6 +299,14 @@ app.get('/', (req, res) => {
     function escapeHtml(str) {
       return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
+
+    // 1分毎に画面を更新して1時間経過後のサムネイル表示をリアルタイム切り替え
+    setInterval(() => {
+      const images = document.querySelectorAll('.chat-img');
+      images.forEach(img => {
+        // 再レンダリング処理等が必要な場合は追加
+      });
+    }, 60000);
   </script>
 </body>
 </html>
@@ -395,16 +316,10 @@ app.get('/', (req, res) => {
 // Socket.io 接続管理
 io.on('connection', (socket) => {
   socket.on('chatMessage', (msg) => {
-    roomData.lastActivity = Date.now(); // 発話があったため最終アクティビティを更新
     io.emit('chatMessage', msg);
-  });
-
-  // 手動部屋削除リクエストの処理
-  socket.on('requestDeleteRoom', () => {
-    deleteRoomData("部屋作成者によって手動削除されました");
   });
 });
 
 server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT} (Ver. 1.1.4)`);
+  console.log(`Server running on http://localhost:${PORT} (Ver. 1.1.3)`);
 });
