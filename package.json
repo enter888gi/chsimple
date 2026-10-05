@@ -1,10 +1,10 @@
-
+{
   "name": "simplechatee",
   "version": "2.0.0",
   "description": "Anonymous simple chat with E2E encryption",
-  "main": "simplechatee.js",
+  "main": "server.js",
   "scripts": {
-    "start": "node simplechatee.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.21.0",
