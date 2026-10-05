@@ -1,14 +1,17 @@
-{
-  "name": "chsimple",
-  "version": "1.2.8",
-  "main": "server.js",
+
+  "name": "simplechatee",
+  "version": "2.0.0",
+  "description": "Anonymous simple chat with E2E encryption",
+  "main": "simplechatee.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node simplechatee.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "multer": "^1.4.5-lts.1",
-    "pg": "^8.11.3",
-    "socket.io": "^4.7.2"
+    "express": "^4.21.0",
+    "socket.io": "^4.7.5",
+    "multer": "^1.4.5-lts.1"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
