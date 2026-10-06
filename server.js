@@ -232,7 +232,7 @@ app.get('/', (req, res) => {
   <div class="header">
     <div class="header-row">
       <span class="room-name" id="header-room-name" onclick="goHome()">SimpleChatee</span>
-      <span class="version-tag">Ver. 2.0.0</span>
+      <span class="version-tag">Ver. 2.0.1</span>
     </div>
     <div class="header-row" id="header-room-id-container" style="display: none;">
       <div class="header-sub-info">
@@ -789,7 +789,7 @@ app.get('/', (req, res) => {
   }
 
   function leaveRoom() {
-    if (confirm('本当にこの部屋から退室しますか？\n\n※部屋作成者が退室しても部屋は残ります。\n　部屋を消す場合は「部屋削除」を使ってください。')) {
+    if (confirm('本当にこの部屋から退室しますか？\\n\\n※部屋作成者が退室しても部屋は残ります。\\n　部屋を消す場合は「部屋削除」を使ってください。')) {
       socket.emit('leave_room', {
         roomName: currentRoomName,
         sessionId: userSessionId
@@ -799,7 +799,7 @@ app.get('/', (req, res) => {
   }
 
   function deleteRoom() {
-    if (confirm('【警告】本当にこの部屋を削除しますか？\n参加者全員が退室し、部屋は消滅します。')) {
+    if (confirm('【警告】本当にこの部屋を削除しますか？\\n参加者全員が退室し、部屋は消滅します。')) {
       const nameToRemove = currentRoomName;
       socket.emit('delete_room', { roomName: currentRoomName }, function(res) {
         if (res.success) {
