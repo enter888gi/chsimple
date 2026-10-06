@@ -80,8 +80,10 @@ function scheduleImageDelete(imageUrl, displaySeconds) {
   if (!imageUrl) return;
   const filename = path.basename(imageUrl);
   const filePath = path.join(uploadDir, filename);
-  // 最低2秒は残す（ラグ・配信遅延余裕）
-  const delayMs = Math.max(2, Number(displaySeconds) || 3600) * 1000;
+  // 最低2秒は残す（ラグ・配信遅延余裕）。0（粗サムネのみ）も2秒後に実画像削除
+  const sec = Number(displaySeconds);
+  const safeSec = (isNaN(sec) || sec < 0) ? 3600 : sec;
+  const delayMs = Math.max(2, safeSec) * 1000;
   setTimeout(() => {
     fs.unlink(filePath, (err) => {
       if (err) return;
@@ -269,7 +271,7 @@ app.get('/', (req, res) => {
   <div class="header">
     <div class="header-row">
       <span class="room-name" id="header-room-name" onclick="goHome()">SimpleChatee</span>
-      <span class="version-tag">Ver. 2.0.3</span>
+      <span class="version-tag">Ver. 2.0.4</span>
     </div>
     <div class="header-row" id="header-room-id-container" style="display: none;">
       <div class="header-sub-info">
@@ -279,6 +281,7 @@ app.get('/', (req, res) => {
       <div class="display-time-row" id="display-time-control" style="display:none;">
         <span>画像</span>
         <select id="image-display-select" onchange="changeImageDisplayTime()">
+          <option value="0">粗サムネのみ</option>
           <option value="1">1秒</option>
           <option value="3">3秒</option>
           <option value="5">5秒</option>
@@ -1013,11 +1016,11 @@ app.get('/', (req, res) => {
 
     stopTyping();
 
-    // 画像+テキスト同時投稿なら強制1時間、画像のみなら部屋設定
+    // 粗サムネのみ(0)のときは常に0。それ以外で画像+テキスト同時なら強制1時間
     const hasText = !!text;
     const hasImage = !!selectedFile;
     let displaySeconds = currentImageDisplaySeconds;
-    if (hasImage && hasText) {
+    if (hasImage && hasText && currentImageDisplaySeconds !== 0) {
       displaySeconds = 3600; // 強制1時間
     }
 
@@ -1067,7 +1070,7 @@ app.get('/', (req, res) => {
   // メッセージごとの投稿時刻・表示秒数を保持（モーダル用）
   const messageMeta = {};
 
-  function handleImageExpire(imgEl, msgId, thumbBase64) {
+  function handleImageExpire(imgEl, msgId, thumbBase64, fromStart) {
     imgEl.style.display = 'none';
     imgEl.dataset.expired = '1';
 
@@ -1075,15 +1078,14 @@ app.get('/', (req, res) => {
       const thumbImg = document.createElement('img');
       thumbImg.src = thumbBase64;
       thumbImg.className = 'chat-img-poster-thumb';
-      thumbImg.title = '時間経過につき粗サムネのみ表示';
-      thumbImg.onclick = function() {
-        openImageModal(msgId);
-      };
+      thumbImg.title = fromStart ? '粗サムネのみ表示' : '時間経過につき粗サムネのみ表示';
+      // 粗サムネ表示後は拡大モーダルを開かない
+      thumbImg.style.cursor = 'default';
       imgEl.parentNode.appendChild(thumbImg);
 
       const note = document.createElement('div');
       note.className = 'poster-only-note';
-      note.innerText = '時間経過につき粗サムネのみ表示';
+      note.innerText = fromStart ? '粗サムネのみ表示' : '時間経過につき粗サムネのみ表示';
       imgEl.parentNode.appendChild(note);
       return;
     }
@@ -1114,7 +1116,8 @@ app.get('/', (req, res) => {
         image: msg.image,
         thumb: msg.thumb || null,
         displaySeconds: displaySec,
-        postedAt: postedAt
+        postedAt: postedAt,
+        thumbOnly: displaySec === 0
       };
     }
 
@@ -1127,25 +1130,31 @@ app.get('/', (req, res) => {
       html += '<div class="text-content">' + escapeHtml(plainText) + '</div>';
     }
     if (msg.image) {
-      html += '<img src="' + msg.image + '" class="chat-img" id="img-' + msg.id + '" onclick="openImageModal(\\'' + msg.id + '\\')" oncontextmenu="return false;">';
+      if (displaySec === 0 && msg.thumb) {
+        // 最初から粗サムネのみ（タップで拡大しない）
+        html += '<img src="' + msg.thumb + '" class="chat-img-poster-thumb" title="粗サムネのみ表示" style="cursor:default;" oncontextmenu="return false;">';
+        html += '<div class="poster-only-note">粗サムネのみ表示</div>';
+      } else {
+        html += '<img src="' + msg.image + '" class="chat-img" id="img-' + msg.id + '" onclick="openImageModal(\\'' + msg.id + '\\')" oncontextmenu="return false;">';
+      }
     }
 
     div.innerHTML = html;
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;
 
-    // 画像表示タイマー（時間経過後は全員に粗いサムネを表示）
-    if (msg.image) {
+    // 画像表示タイマー（時間経過後は全員に粗いサムネを表示・タップ拡大なし）
+    if (msg.image && displaySec !== 0) {
       const imgEl = document.getElementById('img-' + msg.id);
       const elapsed = Date.now() - postedAt;
       const remainMs = Math.max(0, displaySec * 1000 - elapsed);
       if (imgEl) {
         if (remainMs <= 0) {
-          handleImageExpire(imgEl, msg.id, msg.thumb || null);
+          handleImageExpire(imgEl, msg.id, msg.thumb || null, false);
         } else {
           setTimeout(function() {
             if (imgEl && imgEl.parentNode) {
-              handleImageExpire(imgEl, msg.id, msg.thumb || null);
+              handleImageExpire(imgEl, msg.id, msg.thumb || null, false);
             }
           }, remainMs);
         }
@@ -1179,6 +1188,12 @@ app.get('/', (req, res) => {
   function openImageModal(msgId) {
     const meta = messageMeta[msgId];
     if (!meta) return;
+    // 粗サムネのみ / 既に期限切れのものは拡大モーダルを開かない
+    if (meta.thumbOnly || meta.displaySeconds === 0) return;
+
+    const elapsed = Date.now() - (meta.postedAt || Date.now());
+    const remainMs = (meta.displaySeconds * 1000) - elapsed;
+    if (remainMs <= 0) return; // チャット上は既にサムネ表示 → 拡大しない
 
     const modal = document.getElementById('image-modal');
     const img = document.getElementById('image-modal-img');
@@ -1190,33 +1205,19 @@ app.get('/', (req, res) => {
       imageModalTimer = null;
     }
 
-    const elapsed = Date.now() - (meta.postedAt || Date.now());
-    const remainMs = (meta.displaySeconds * 1000) - elapsed;
-    const alreadyExpired = remainMs <= 0;
-
     imageModalOpenedAt = Date.now();
     note.textContent = '';
+    img.src = meta.image;
+    img.style.imageRendering = 'auto';
 
-    if (alreadyExpired && meta.thumb) {
-      img.src = meta.thumb;
-      img.style.imageRendering = 'pixelated';
-      note.textContent = '時間経過につき粗サムネのみ表示';
-    } else {
-      img.src = meta.image;
-      img.style.imageRendering = 'auto';
-      // 最低1秒は表示してから粗サムネへ
-      const switchAfter = alreadyExpired ? 1000 : Math.max(1000, remainMs);
-      if (meta.thumb || alreadyExpired) {
-        imageModalTimer = setTimeout(function() {
-          if (meta.thumb) {
-            img.src = meta.thumb;
-            img.style.imageRendering = 'pixelated';
-            note.textContent = '時間経過につき粗サムネのみ表示';
-          } else {
-            note.textContent = '画像の表示期限が切れました';
-          }
-        }, switchAfter);
-      }
+    // 最低1秒表示のうえ、残り時間で粗サムネへ（先に開いたモーダルは閉じるまで視聴可）
+    const switchAfter = Math.max(1000, remainMs);
+    if (meta.thumb) {
+      imageModalTimer = setTimeout(function() {
+        img.src = meta.thumb;
+        img.style.imageRendering = 'pixelated';
+        note.textContent = '時間経過につき粗サムネのみ表示';
+      }, switchAfter);
     }
 
     modal.classList.add('active');
@@ -1542,13 +1543,14 @@ io.on('connection', (socket) => {
   socket.on('change_image_display_time', ({ roomName, seconds }) => {
     const room = rooms[roomName];
     if (!room) return;
-    if (![1, 3, 5, 3600].includes(seconds)) return;
+    if (![0, 1, 3, 5, 3600].includes(seconds)) return;
 
     room.imageDisplaySeconds = seconds;
     room.lastActivityAt = Date.now();
 
     let label = seconds + '秒';
-    if (seconds === 3600) label = '1時間';
+    if (seconds === 0) label = '粗サムネのみ';
+    else if (seconds === 3600) label = '1時間';
 
     const systemMsg = {
       type: 'system',
