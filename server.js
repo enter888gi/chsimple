@@ -119,7 +119,7 @@ app.get('/', (req, res) => {
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="robots" content="noindex, nofollow">
   <title>SimpleChatee - Anonymous Chat</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
@@ -133,20 +133,118 @@ app.get('/', (req, res) => {
       --border-color: #334155;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background-color: var(--bg-color); color: var(--text-color); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 10px; }
-    .container { width: 100%; max-width: 500px; background: var(--card-bg); border-radius: 16px; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; height: 90vh; position: relative; }
-    .header { padding: 10px 14px; border-bottom: 1px solid var(--border-color); background: #111827; display: flex; flex-direction: column; gap: 6px; }
-    .header-row { display: flex; justify-content: space-between; align-items: center; width: 100%; white-space: nowrap; }
-    .header .room-name { color: var(--accent-color); font-weight: bold; cursor: pointer; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; font-size: 1.05rem; max-width: 70%; }
-    .header-sub-info { font-size: 0.75rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-    .header-copy-btn { background: #334155; color: #f8fafc; border: none; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-size: 0.7rem; line-height: 1.2; flex-shrink: 0; margin: 0; }
+    html, body { height: 100%; }
+    body {
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      display: flex;
+      justify-content: center;
+      align-items: stretch;
+      height: 100dvh;
+      min-height: 100dvh;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+    .container {
+      width: 100%;
+      max-width: 560px;
+      background: var(--card-bg);
+      border-radius: 0;
+      border: 0;
+      border-left: 1px solid var(--border-color);
+      border-right: 1px solid var(--border-color);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      min-height: 0;
+      position: relative;
+    }
+    .header {
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--border-color);
+      background: #111827;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .header-row { display: flex; justify-content: space-between; align-items: center; width: 100%; min-width: 0; gap: 6px; }
+    .header-top { flex-wrap: nowrap; }
+    .header .room-name {
+      color: var(--accent-color);
+      font-weight: bold;
+      cursor: pointer;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      overflow: hidden;
+      font-size: 0.95rem;
+      flex: 1 1 auto;
+      min-width: 0;
+      max-width: none;
+    }
+    .header-sub-info {
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      white-space: nowrap;
+      flex-shrink: 0;
+      margin-left: auto;
+    }
+    .header-copy-btn { background: #334155; color: #f8fafc; border: none; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-size: 0.66rem; line-height: 1.2; flex-shrink: 0; width: auto; margin: 0; }
     .header-copy-btn:hover { background: #475569; }
-    .version-tag { font-size: 0.65rem; color: #64748b; flex-shrink: 0; }
+    .version-tag { font-size: 0.58rem; color: #64748b; flex-shrink: 0; }
     .btn-action-group { display: flex; gap: 6px; width: 100%; align-items: stretch; }
-    .btn-leave { background: #64748b; color: white; border: none; padding: 8px 6px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: bold; flex: 2.2 1 0; min-width: 0; text-align: left; line-height: 1.2; }
+    .btn-leave {
+      background: #64748b;
+      color: white;
+      border: none;
+      padding: 4px 6px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.72rem;
+      font-weight: bold;
+      flex: 2.2 1 0;
+      min-width: 0;
+      text-align: left;
+      line-height: 1.15;
+      width: auto;
+      margin: 0;
+    }
     .btn-leave:hover { background: #475569; }
-    .btn-leave .sub-text { font-size: 0.58rem; font-weight: normal; opacity: 0.85; display: block; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .btn-host-action { background: #ef4444; color: white; border: none; padding: 8px 4px; border-radius: 6px; cursor: pointer; font-size: 0.72rem; font-weight: bold; line-height: 1.2; white-space: nowrap; display: none; align-items: center; justify-content: center; flex: 1 1 0; min-width: 0; text-align: center; }
+    .btn-leave .sub-text {
+      font-size: 0.52rem;
+      font-weight: normal;
+      opacity: 0.85;
+      display: block;
+      margin-top: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .btn-host-action {
+      background: #ef4444;
+      color: white;
+      border: none;
+      padding: 4px 4px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.7rem;
+      font-weight: bold;
+      line-height: 1.15;
+      white-space: nowrap;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex: 1 1 0;
+      min-width: 0;
+      text-align: center;
+      width: auto;
+      margin: 0;
+    }
     .btn-host-action:hover { background: #dc2626; }
     .btn-kick { background: #f59e0b; }
     .btn-kick:hover { background: #d97706; }
@@ -158,12 +256,20 @@ app.get('/', (req, res) => {
     .room-card-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .room-card-name { font-weight: bold; font-size: 0.95rem; color: var(--text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .room-card-meta { font-size: 0.72rem; color: var(--text-muted); }
-    .view { display: none; padding: 20px; flex-direction: column; height: 100%; overflow-y: auto; }
+    .view {
+      display: none;
+      padding: 20px;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+    }
     .view.active { display: flex; }
+    #view-chat { padding: 8px 10px 0; overflow: hidden; }
     label { font-size: 0.85rem; color: var(--text-muted); margin-top: 12px; display: block; }
-    input, textarea, select { width: 100%; padding: 12px; margin-top: 6px; border-radius: 8px; border: 1px solid var(--border-color); background: #0f172a; color: white; outline: none; }
+    input, textarea, select { width: 100%; padding: 12px; margin-top: 6px; border-radius: 8px; border: 1px solid var(--border-color); background: #0f172a; color: white; outline: none; font-size: 16px; }
     input:focus, textarea:focus, select:focus { border-color: var(--accent-color); }
-    textarea { resize: none; height: 44px; font-size: 0.9rem; line-height: 1.4; }
+    textarea { resize: none; height: 44px; font-size: 16px; line-height: 1.4; }
     button { width: 100%; padding: 12px; margin-top: 18px; border-radius: 8px; border: none; background: var(--accent-color); color: #0f172a; font-weight: bold; cursor: pointer; }
     .btn-secondary { background: #475569; color: white; }
     .max-members-group { display: flex; gap: 8px; margin-top: 8px; }
@@ -171,7 +277,17 @@ app.get('/', (req, res) => {
     .max-members-group input[type="radio"] { display: none; }
     .max-members-group span { display: block; text-align: center; padding: 10px 0; border-radius: 8px; border: 1px solid var(--border-color); background: #0f172a; color: var(--text-muted); cursor: pointer; font-size: 0.9rem; }
     .max-members-group input[type="radio"]:checked + span { border-color: var(--accent-color); background: #0c4a6e; color: white; font-weight: bold; }
-    #chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-bottom: 10px; }
+    #chat-messages {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding-bottom: 10px;
+    }
     .message { display: flex; flex-direction: column; width: fit-content; max-width: 80%; padding: 8px 12px; border-radius: 12px; position: relative; word-break: break-word; align-self: flex-start; font-size: 0.85rem; line-height: 1.4; }
     .message.self { align-self: flex-end; background: #0284c7; color: white; }
     .message.self .sender { color: #e0f2fe; }
@@ -188,13 +304,23 @@ app.get('/', (req, res) => {
     .chat-img-poster-thumb { width: 100px; height: auto; border-radius: 6px; margin-top: 6px; image-rendering: pixelated; border: 1px dashed #94a3b8; opacity: 0.85; }
     .expired-img-note { font-size: 0.72rem; color: #f87171; font-style: italic; margin-top: 4px; }
     .poster-only-note { font-size: 0.68rem; color: #94a3b8; margin-top: 2px; }
-    .input-area { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--border-color); }
+    .input-area {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding-top: 6px;
+      padding-bottom: calc(4px + env(safe-area-inset-bottom));
+      border-top: 1px solid var(--border-color);
+      flex-shrink: 0;
+      background: var(--card-bg);
+    }
     .typing-indicator { font-size: 0.75rem; color: var(--text-muted); font-style: italic; min-height: 1.1rem; }
     .input-row { display: flex; gap: 8px; align-items: flex-end; }
     .file-btn { background: #475569; color: white; padding: 12px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; margin: 0; width: auto; height: 44px; display: flex; align-items: center; justify-content: center; }
-    .security-disclaimer { font-size: 0.68rem; color: #94a3b8; line-height: 1.35; margin-top: 4px; padding: 0 2px; }
-    .display-time-row { display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: var(--text-muted); }
-    .display-time-row select { width: auto; padding: 4px 8px; margin: 0; font-size: 0.75rem; }
+    .input-row button { margin-top: 0; width: auto; }
+    .security-disclaimer { font-size: 0.58rem; color: #94a3b8; line-height: 1.3; margin-top: 2px; padding: 0 2px; }
+    .display-time-row { display: flex; align-items: center; gap: 4px; font-size: 0.68rem; color: var(--text-muted); flex-shrink: 0; }
+    .display-time-row select { width: auto; padding: 2px 4px; margin: 0; font-size: 0.68rem; }
     #full-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(4px); z-index: 9999; display: none; justify-content: center; align-items: center; }
     .toast-message { background: #ef4444; color: white; padding: 14px 28px; border-radius: 12px; font-weight: bold; font-size: 1rem; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); text-align: center; }
     .modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.75); z-index: 10000; display: none; justify-content: center; align-items: center; }
@@ -211,10 +337,10 @@ app.get('/', (req, res) => {
     #image-modal.active { display: flex; }
     #image-modal-inner { position: relative; max-width: 100%; max-height: 100%; display: flex; flex-direction: column; align-items: center; }
     #image-modal-img { max-width: 100vw; max-height: 100vh; object-fit: contain; border-radius: 4px; user-select: none; -webkit-user-drag: none; }
-    #image-modal-close { position: fixed; top: 12px; right: 12px; width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(248,250,252,0.95); color: #0f172a; font-size: 1.4rem; font-weight: bold; cursor: pointer; z-index: 10002; display: flex; align-items: center; justify-content: center; line-height: 1; box-shadow: 0 2px 10px rgba(0,0,0,0.4); }
+    #image-modal-close { position: fixed; top: calc(12px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right)); width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(248,250,252,0.95); color: #0f172a; font-size: 1.4rem; font-weight: bold; cursor: pointer; z-index: 10002; display: flex; align-items: center; justify-content: center; line-height: 1; box-shadow: 0 2px 10px rgba(0,0,0,0.4); margin: 0; }
     #image-modal-close:hover { background: #fff; }
     #image-modal-note { color: #94a3b8; font-size: 0.75rem; margin-top: 8px; text-align: center; }
-    .soft-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: rgba(30,41,59,0.92); color: #e2e8f0; padding: 8px 16px; border-radius: 8px; font-size: 0.8rem; z-index: 10003; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+    .soft-toast { position: fixed; bottom: calc(24px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); background: rgba(30,41,59,0.92); color: #e2e8f0; padding: 8px 16px; border-radius: 8px; font-size: 0.8rem; z-index: 10003; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
     .soft-toast.show { opacity: 1; }
   </style>
 </head>
@@ -257,24 +383,22 @@ app.get('/', (req, res) => {
 
 <div class="container">
   <div class="header">
-    <div class="header-row">
+    <div class="header-row header-top">
       <span class="room-name" id="header-room-name" onclick="goHome()">SimpleChatee</span>
-      <span class="version-tag">Ver. 2.0.6</span>
-    </div>
-    <div class="header-row" id="header-room-id-container" style="display: none;">
-      <div class="header-sub-info">
+      <span class="version-tag">Ver. 2.0.7</span>
+      <div class="header-sub-info" id="header-room-id-container" style="display: none;">
         <span id="member-count"></span>
         <button class="header-copy-btn" onclick="copyRoomLink()">🔗コピー</button>
-      </div>
-      <div class="display-time-row" id="display-time-control" style="display:none;">
-        <span>画像</span>
-        <select id="image-display-select" onchange="changeImageDisplayTime()">
-          <option value="0">粗サムネのみ</option>
-          <option value="1">1秒</option>
-          <option value="3">3秒</option>
-          <option value="5">5秒</option>
-          <option value="3600">1時間</option>
-        </select>
+        <div class="display-time-row" id="display-time-control" style="display:none;">
+          <span>画像</span>
+          <select id="image-display-select" onchange="changeImageDisplayTime()">
+            <option value="0">粗サムネのみ</option>
+            <option value="1">1秒</option>
+            <option value="3">3秒</option>
+            <option value="5">5秒</option>
+            <option value="3600">1時間</option>
+          </select>
+        </div>
       </div>
     </div>
     <div class="header-row" id="room-action-container" style="display: none;">
@@ -373,6 +497,18 @@ app.get('/', (req, res) => {
 
   function noteActivity() {
     lastChatActivityAt = Date.now();
+  }
+
+  function bindVisualViewport() {
+    const vv = window.visualViewport;
+    const shell = document.querySelector('.container');
+    if (!vv || !shell) return;
+    const sync = function() {
+      shell.style.height = vv.height + 'px';
+    };
+    vv.addEventListener('resize', sync);
+    vv.addEventListener('scroll', sync);
+    sync();
   }
 
   socket.on('connect', function() {
@@ -671,6 +807,7 @@ app.get('/', (req, res) => {
   window.onload = function() {
     userSessionId = getOrCreateSessionId();
     renderSavedRoomsList();
+    bindVisualViewport();
 
     const urlParams = new URLSearchParams(window.location.search);
     const urlRoomRef = urlParams.get('r') || urlParams.get('room');
