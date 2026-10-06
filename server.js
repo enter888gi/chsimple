@@ -7,7 +7,7 @@ const fs = require('fs');
 
 const app = Express();
 const server = http.createServer(app);
-const io = new Server(server, { maxHttpBufferSize: 1e7 });
+const io = new Server(server, { maxHttpBufferSize: 35e6 }); // 画像30MB対応のため余裕を持たせる
 
 // --- 画像の保存先設定 (uploads フォルダ) ---
 const uploadDir = path.join(__dirname, 'uploads');
@@ -23,7 +23,7 @@ const storage = multer.diskStorage({
     cb(null, uniqueName);
   }
 });
-const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB上限
+const upload = multer({ storage, limits: { fileSize: 30 * 1024 * 1024 } }); // 30MB上限
 
 // 静的ファイルとしてアップロード画像を公開
 app.use('/uploads', Express.static(uploadDir));
@@ -64,16 +64,31 @@ app.post('/api/upload', upload.single('image'), (req, res) => {
   const imageUrl = '/uploads/' + req.file.filename;
   const filePath = req.file.path;
 
-  // 最大1時間後に自動物理削除
+  // フォールバック: 最大1時間後に物理削除（表示時間での削除は send_message 側）
   setTimeout(() => {
     fs.unlink(filePath, (err) => {
-      if (err) console.error('画像自動削除エラー:', err);
-      else console.log('1時間経過のため画像を自動削除しました:', req.file.filename);
+      if (err) return; // 既に削除済みなら無視
+      console.log('フォールバック1時間削除:', req.file.filename);
     });
   }, 60 * 60 * 1000);
 
   res.json({ imageUrl });
 });
+
+// 表示時間に応じた実画像削除（タイムラグ許容）
+function scheduleImageDelete(imageUrl, displaySeconds) {
+  if (!imageUrl) return;
+  const filename = path.basename(imageUrl);
+  const filePath = path.join(uploadDir, filename);
+  // 最低2秒は残す（ラグ・配信遅延余裕）
+  const delayMs = Math.max(2, Number(displaySeconds) || 3600) * 1000;
+  setTimeout(() => {
+    fs.unlink(filePath, (err) => {
+      if (err) return;
+      console.log('表示時間経過により画像削除:', filename, delayMs + 'ms');
+    });
+  }, delayMs);
+}
 
 // --- 単一ファイルWebページ配信 ---
 app.get('/', (req, res) => {
@@ -196,12 +211,34 @@ app.get('/', (req, res) => {
     .modal-member-list { max-height: 200px; overflow-y: auto; margin-bottom: 12px; }
     .modal-member-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-radius: 6px; background: #0f172a; margin-bottom: 6px; font-size: 0.85rem; }
     .modal-member-item button { width: auto; margin: 0; padding: 4px 10px; font-size: 0.75rem; background: #f59e0b; color: #0f172a; }
+
+    /* 画像拡大モーダル */
+    #image-modal { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.92); z-index: 10001; display: none; justify-content: center; align-items: center; padding: 12px; }
+    #image-modal.active { display: flex; }
+    #image-modal-inner { position: relative; max-width: 100%; max-height: 100%; display: flex; flex-direction: column; align-items: center; }
+    #image-modal-img { max-width: 100vw; max-height: 100vh; object-fit: contain; border-radius: 4px; user-select: none; -webkit-user-drag: none; }
+    #image-modal-close { position: fixed; top: 12px; right: 12px; width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(248,250,252,0.95); color: #0f172a; font-size: 1.4rem; font-weight: bold; cursor: pointer; z-index: 10002; display: flex; align-items: center; justify-content: center; line-height: 1; box-shadow: 0 2px 10px rgba(0,0,0,0.4); }
+    #image-modal-close:hover { background: #fff; }
+    #image-modal-note { color: #94a3b8; font-size: 0.75rem; margin-top: 8px; text-align: center; }
+    .soft-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: rgba(30,41,59,0.92); color: #e2e8f0; padding: 8px 16px; border-radius: 8px; font-size: 0.8rem; z-index: 10003; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+    .soft-toast.show { opacity: 1; }
   </style>
 </head>
 <body>
 
 <div id="full-overlay">
   <div class="toast-message" id="toast-text">現在満員です</div>
+</div>
+
+<div id="soft-toast" class="soft-toast">右クリックできません</div>
+
+<!-- 画像拡大モーダル -->
+<div id="image-modal" onclick="closeImageModal(event)">
+  <button type="button" id="image-modal-close" onclick="closeImageModal(event)" aria-label="閉じる">×</button>
+  <div id="image-modal-inner">
+    <img id="image-modal-img" alt="画像" oncontextmenu="return false;" />
+    <div id="image-modal-note"></div>
+  </div>
 </div>
 
 <!-- 強制退室モーダル -->
@@ -232,7 +269,7 @@ app.get('/', (req, res) => {
   <div class="header">
     <div class="header-row">
       <span class="room-name" id="header-room-name" onclick="goHome()">SimpleChatee</span>
-      <span class="version-tag">Ver. 2.0.1</span>
+      <span class="version-tag">Ver. 2.0.3</span>
     </div>
     <div class="header-row" id="header-room-id-container" style="display: none;">
       <div class="header-sub-info">
@@ -325,7 +362,7 @@ app.get('/', (req, res) => {
         <button style="margin-top:0; width:auto; padding: 0 16px; height: 44px;" onclick="sendMessage()">送信</button>
       </div>
       <div class="security-disclaimer">
-        🔒 チャット内容はE2E暗号化により管理者も閲覧不可です。画像は最大1時間で自動削除されます。
+        🔒 チャット内容はE2E暗号化により管理者も閲覧不可です。画像は表示時間経過後に削除されます。
       </div>
     </div>
   </div>
@@ -1027,14 +1064,21 @@ app.get('/', (req, res) => {
     });
   }
 
+  // メッセージごとの投稿時刻・表示秒数を保持（モーダル用）
+  const messageMeta = {};
+
   function handleImageExpire(imgEl, msgId, thumbBase64) {
     imgEl.style.display = 'none';
+    imgEl.dataset.expired = '1';
 
     if (thumbBase64) {
       const thumbImg = document.createElement('img');
       thumbImg.src = thumbBase64;
       thumbImg.className = 'chat-img-poster-thumb';
       thumbImg.title = '時間経過につき粗サムネのみ表示';
+      thumbImg.onclick = function() {
+        openImageModal(msgId);
+      };
       imgEl.parentNode.appendChild(thumbImg);
 
       const note = document.createElement('div');
@@ -1062,6 +1106,17 @@ app.get('/', (req, res) => {
     div.id = 'msg-' + msg.id;
 
     const plainText = msg.text ? decryptText(msg.text, currentKey) : '';
+    const displaySec = (typeof msg.displaySeconds === 'number') ? msg.displaySeconds : currentImageDisplaySeconds;
+    const postedAt = msg.postedAt || Date.now();
+
+    if (msg.image) {
+      messageMeta[msg.id] = {
+        image: msg.image,
+        thumb: msg.thumb || null,
+        displaySeconds: displaySec,
+        postedAt: postedAt
+      };
+    }
 
     let html = '';
     if (isSelf) {
@@ -1072,7 +1127,7 @@ app.get('/', (req, res) => {
       html += '<div class="text-content">' + escapeHtml(plainText) + '</div>';
     }
     if (msg.image) {
-      html += '<img src="' + msg.image + '" class="chat-img" id="img-' + msg.id + '" onclick="openImageInNewTab(\\'' + msg.image + '\\')">';
+      html += '<img src="' + msg.image + '" class="chat-img" id="img-' + msg.id + '" onclick="openImageModal(\\'' + msg.id + '\\')" oncontextmenu="return false;">';
     }
 
     div.innerHTML = html;
@@ -1081,14 +1136,19 @@ app.get('/', (req, res) => {
 
     // 画像表示タイマー（時間経過後は全員に粗いサムネを表示）
     if (msg.image) {
-      const displaySec = (typeof msg.displaySeconds === 'number') ? msg.displaySeconds : currentImageDisplaySeconds;
       const imgEl = document.getElementById('img-' + msg.id);
-      if (imgEl && displaySec > 0) {
-        setTimeout(function() {
-          if (imgEl && imgEl.parentNode) {
-            handleImageExpire(imgEl, msg.id, msg.thumb || null);
-          }
-        }, displaySec * 1000);
+      const elapsed = Date.now() - postedAt;
+      const remainMs = Math.max(0, displaySec * 1000 - elapsed);
+      if (imgEl) {
+        if (remainMs <= 0) {
+          handleImageExpire(imgEl, msg.id, msg.thumb || null);
+        } else {
+          setTimeout(function() {
+            if (imgEl && imgEl.parentNode) {
+              handleImageExpire(imgEl, msg.id, msg.thumb || null);
+            }
+          }, remainMs);
+        }
       }
     }
   }
@@ -1105,9 +1165,90 @@ app.get('/', (req, res) => {
     container.scrollTop = container.scrollHeight;
   }
 
-  function openImageInNewTab(src) {
-    window.open(src, '_blank');
+  let imageModalTimer = null;
+  let imageModalOpenedAt = 0;
+
+  function showSoftToast(text) {
+    const el = document.getElementById('soft-toast');
+    if (!el) return;
+    el.textContent = text || '右クリックできません';
+    el.classList.add('show');
+    setTimeout(function() { el.classList.remove('show'); }, 1000);
   }
+
+  function openImageModal(msgId) {
+    const meta = messageMeta[msgId];
+    if (!meta) return;
+
+    const modal = document.getElementById('image-modal');
+    const img = document.getElementById('image-modal-img');
+    const note = document.getElementById('image-modal-note');
+    if (!modal || !img) return;
+
+    if (imageModalTimer) {
+      clearTimeout(imageModalTimer);
+      imageModalTimer = null;
+    }
+
+    const elapsed = Date.now() - (meta.postedAt || Date.now());
+    const remainMs = (meta.displaySeconds * 1000) - elapsed;
+    const alreadyExpired = remainMs <= 0;
+
+    imageModalOpenedAt = Date.now();
+    note.textContent = '';
+
+    if (alreadyExpired && meta.thumb) {
+      img.src = meta.thumb;
+      img.style.imageRendering = 'pixelated';
+      note.textContent = '時間経過につき粗サムネのみ表示';
+    } else {
+      img.src = meta.image;
+      img.style.imageRendering = 'auto';
+      // 最低1秒は表示してから粗サムネへ
+      const switchAfter = alreadyExpired ? 1000 : Math.max(1000, remainMs);
+      if (meta.thumb || alreadyExpired) {
+        imageModalTimer = setTimeout(function() {
+          if (meta.thumb) {
+            img.src = meta.thumb;
+            img.style.imageRendering = 'pixelated';
+            note.textContent = '時間経過につき粗サムネのみ表示';
+          } else {
+            note.textContent = '画像の表示期限が切れました';
+          }
+        }, switchAfter);
+      }
+    }
+
+    modal.classList.add('active');
+  }
+
+  function closeImageModal(event, force) {
+    if (event) {
+      if (!force && event.target && event.target.id === 'image-modal-img') return;
+      event.stopPropagation();
+    }
+    // 最低1秒は表示
+    const shown = Date.now() - imageModalOpenedAt;
+    if (shown < 1000 && !force) {
+      setTimeout(function() { closeImageModal(null, true); }, 1000 - shown);
+      return;
+    }
+    const modal = document.getElementById('image-modal');
+    if (modal) modal.classList.remove('active');
+    if (imageModalTimer) {
+      clearTimeout(imageModalTimer);
+      imageModalTimer = null;
+    }
+  }
+
+  // 右クリック禁止＋トースト
+  document.addEventListener('contextmenu', function(e) {
+    const t = e.target;
+    if (t && (t.id === 'image-modal-img' || (t.classList && t.classList.contains('chat-img')) || (t.classList && t.classList.contains('chat-img-poster-thumb')))) {
+      e.preventDefault();
+      showSoftToast('右クリックできません');
+    }
+  });
 
   function escapeHtml(str) {
     if (!str) return '';
@@ -1456,6 +1597,7 @@ io.on('connection', (socket) => {
 
     room.lastActivityAt = Date.now();
 
+    const ds = typeof displaySeconds === 'number' ? displaySeconds : room.imageDisplaySeconds;
     const messageData = {
       type: 'user',
       id: msgId || Math.random().toString(36).substring(2, 10),
@@ -1464,9 +1606,15 @@ io.on('connection', (socket) => {
       colorIndex: sender ? sender.colorIndex : 0,
       text,
       image,
-      thumb: thumb || null,   // 全員に配る粗いサムネ
-      displaySeconds: typeof displaySeconds === 'number' ? displaySeconds : room.imageDisplaySeconds
+      thumb: thumb || null,
+      displaySeconds: ds,
+      postedAt: Date.now()
     };
+
+    // 表示時間に応じて実画像を削除（タイムラグ許容）
+    if (image) {
+      scheduleImageDelete(image, ds);
+    }
 
     room.messages.push(messageData);
     io.to(targetRoomName).emit('receive_message', messageData);
