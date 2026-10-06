@@ -28,6 +28,11 @@ const upload = multer({ storage, limits: { fileSize: 30 * 1024 * 1024 } }); // 3
 // 静的ファイルとしてアップロード画像を公開
 app.use('/uploads', Express.static(uploadDir));
 
+// Render 無料枠のアイドル対策用（HTTP で確実に起こす）
+app.get('/api/ping', (req, res) => {
+  res.json({ ok: true, t: Date.now() });
+});
+
 // --- 部屋データ管理（メモリのみ・Supabase完全削除） ---
 // key: roomName
 const rooms = {};
@@ -271,7 +276,7 @@ app.get('/', (req, res) => {
   <div class="header">
     <div class="header-row">
       <span class="room-name" id="header-room-name" onclick="goHome()">SimpleChatee</span>
-      <span class="version-tag">Ver. 2.0.4</span>
+      <span class="version-tag">Ver. 2.0.5</span>
     </div>
     <div class="header-row" id="header-room-id-container" style="display: none;">
       <div class="header-sub-info">
@@ -365,7 +370,7 @@ app.get('/', (req, res) => {
         <button style="margin-top:0; width:auto; padding: 0 16px; height: 44px;" onclick="sendMessage()">送信</button>
       </div>
       <div class="security-disclaimer">
-        🔒 チャット内容はE2E暗号化により管理者も閲覧不可です。画像は表示時間経過後に削除されます。
+        🔒 チャット内容はE2E暗号化により管理者も閲覧不可です。画像は表示時間経過後に削除されます。粗サムネのみの場合はフル画像をサーバーに保存しません。
       </div>
     </div>
   </div>
@@ -383,11 +388,16 @@ app.get('/', (req, res) => {
   let currentMaxMembers = 3;
   let currentImageDisplaySeconds = 5;
   let keepAliveTimer = null;
+  let lastChatActivityAt = Date.now();
   let pendingKickSessionId = null;
   let pendingKickNickname = null;
   
   let typingTimeout = null;
   let isTyping = false;
+
+  function noteActivity() {
+    lastChatActivityAt = Date.now();
+  }
 
   // --- Socket.io 受信イベント ---
   socket.on('connect', function() {
@@ -419,6 +429,7 @@ app.get('/', (req, res) => {
         if (msg.type === 'system') {
           renderSystemNotification(msg.text, msg.id);
         } else {
+          noteActivity();
           renderSingleMessage(msg);
         }
       });
@@ -430,6 +441,7 @@ app.get('/', (req, res) => {
     if (msg.type === 'system') {
       renderSystemNotification(msg.text, msg.id);
     } else {
+      noteActivity();
       renderSingleMessage(msg);
     }
   });
@@ -449,6 +461,7 @@ app.get('/', (req, res) => {
     currentImageDisplaySeconds = data.seconds;
     const sel = document.getElementById('image-display-select');
     if (sel) sel.value = String(data.seconds);
+    noteActivity();
     renderSystemNotification(data.text, data.id);
   });
 
@@ -467,17 +480,17 @@ app.get('/', (req, res) => {
       : '部屋主によってこの部屋は削除されました。';
     if (currentRoomName) removeRoomFromStorage(currentRoomName);
     alert(reason);
-    goHome();
+    goHome(true);
   });
 
   socket.on('force_left', function() {
     // 強制退室された本人だけが受け取る。静かにトップへ
     stopKeepAlive();
-    goHome();
+    goHome(true);
   });
 
   socket.on('room_full_rejected', function() {
-    showToast('現在満員です', function() { goHome(); });
+    showToast('現在満員です', function() { goHome(true); });
   });
 
   socket.on('members_for_kick', function(data) {
@@ -666,7 +679,7 @@ app.get('/', (req, res) => {
         setKeyToHash(currentKey);
       } else {
         if (res.full) {
-          showToast('現在満員です', function() { goHome(); });
+          showToast('現在満員です', function() { goHome(true); });
         } else {
           // 部屋が消えている場合は履歴から削除
           alert(res.error || '入室に失敗しました（部屋が削除された可能性があります）');
@@ -723,7 +736,14 @@ app.get('/', (req, res) => {
     document.getElementById(id).classList.add('active');
   }
 
-  function goHome() {
+  // skipLeave: 既にサーバー側で退室済みのとき true（force_left / room_deleted など）
+  function goHome(skipLeave) {
+    if (!skipLeave && currentRoomName && userSessionId) {
+      socket.emit('leave_room', {
+        roomName: currentRoomName,
+        sessionId: userSessionId
+      });
+    }
     stopKeepAlive();
     currentRoomName = '';
     currentKey = '';
@@ -820,7 +840,7 @@ app.get('/', (req, res) => {
         setKeyToHash(currentKey);
       } else {
         if (res.full) {
-          showToast('現在満員です', function() { goHome(); });
+          showToast('現在満員です', function() { goHome(true); });
         } else {
           alert(res.error || '入室に失敗しました');
         }
@@ -834,7 +854,7 @@ app.get('/', (req, res) => {
         roomName: currentRoomName,
         sessionId: userSessionId
       });
-      goHome();
+      goHome(true);
     }
   }
 
@@ -845,7 +865,7 @@ app.get('/', (req, res) => {
         if (res.success) {
           removeRoomFromStorage(nameToRemove);
           alert('部屋を削除しました');
-          goHome();
+          goHome(true);
         } else {
           alert(res.error || '削除権限がありません');
         }
@@ -895,6 +915,7 @@ app.get('/', (req, res) => {
     currentRoomName = roomName;
     currentMaxMembers = maxMembers || 3;
     currentImageDisplaySeconds = imageDisplaySeconds || 5;
+    noteActivity();
 
     document.getElementById('header-room-name').innerText = roomName;
     document.getElementById('header-room-id-container').style.display = 'flex';
@@ -943,22 +964,27 @@ app.get('/', (req, res) => {
   function changeImageDisplayTime() {
     const sel = document.getElementById('image-display-select');
     const seconds = parseInt(sel.value, 10);
-    if (!seconds) return;
+    // 0（粗サムネのみ）は有効値。!seconds だと誤ってスキップされる
+    if (isNaN(seconds) || ![0, 1, 3, 5, 3600].includes(seconds)) return;
+    noteActivity();
     socket.emit('change_image_display_time', {
       roomName: currentRoomName,
       seconds: seconds
     });
   }
 
-  // --- ホストkeep-alive（14分間隔） ---
+  // --- ホスト keep-alive：5分間無発話なら1分ごとに発動 ---
   function startKeepAlive() {
     stopKeepAlive();
     if (!isHost) return;
+    lastChatActivityAt = Date.now();
     keepAliveTimer = setInterval(function() {
-      if (socket.connected && currentRoomName) {
+      if (!socket.connected || !currentRoomName || !isHost) return;
+      if (Date.now() - lastChatActivityAt >= 5 * 60 * 1000) {
         socket.emit('keep_alive', { roomName: currentRoomName });
+        fetch('/api/ping').catch(function() {});
       }
-    }, 14 * 60 * 1000); // 14分
+    }, 60 * 1000); // 1分ごとにチェック
   }
 
   function stopKeepAlive() {
@@ -1015,6 +1041,7 @@ app.get('/', (req, res) => {
     }
 
     stopTyping();
+    noteActivity();
 
     // 粗サムネのみ(0)のときは常に0。それ以外で画像+テキスト同時なら強制1時間
     const hasText = !!text;
@@ -1029,16 +1056,19 @@ app.get('/', (req, res) => {
         thumbBase64 = await createUltraLightThumbnail(selectedFile);
       } catch (e) {}
 
-      const formData = new FormData();
-      formData.append('image', selectedFile);
+      // 粗サムネのみ(0)のときはフル画像をサーバーにアップロードしない
+      if (displaySeconds !== 0) {
+        const formData = new FormData();
+        formData.append('image', selectedFile);
 
-      try {
-        const res = await fetch('/api/upload', { method: 'POST', body: formData });
-        const data = await res.json();
-        imageUrl = data.imageUrl;
-      } catch (e) {
-        alert('画像のアップロードに失敗しました');
-        return;
+        try {
+          const res = await fetch('/api/upload', { method: 'POST', body: formData });
+          const data = await res.json();
+          imageUrl = data.imageUrl;
+        } catch (e) {
+          alert('画像のアップロードに失敗しました');
+          return;
+        }
       }
     }
 
@@ -1050,7 +1080,7 @@ app.get('/', (req, res) => {
       roomName: currentRoomName,
       text: encryptedText,
       image: imageUrl,
-      thumb: thumbBase64,          // 全員に配る粗いサムネ
+      thumb: thumbBase64,
       displaySeconds: displaySeconds
     });
 
@@ -1111,13 +1141,14 @@ app.get('/', (req, res) => {
     const displaySec = (typeof msg.displaySeconds === 'number') ? msg.displaySeconds : currentImageDisplaySeconds;
     const postedAt = msg.postedAt || Date.now();
 
-    if (msg.image) {
+    // 粗サムネのみ、またはフル画像がある場合のメタ
+    if (msg.image || (displaySec === 0 && msg.thumb)) {
       messageMeta[msg.id] = {
-        image: msg.image,
+        image: msg.image || null,
         thumb: msg.thumb || null,
         displaySeconds: displaySec,
         postedAt: postedAt,
-        thumbOnly: displaySec === 0
+        thumbOnly: displaySec === 0 || !msg.image
       };
     }
 
@@ -1129,14 +1160,21 @@ app.get('/', (req, res) => {
     if (plainText) {
       html += '<div class="text-content">' + escapeHtml(plainText) + '</div>';
     }
-    if (msg.image) {
+    if (displaySec === 0 && msg.thumb) {
+      // 最初から粗サムネのみ（タップで拡大しない）・フル画像なし
+      html += '<img src="' + msg.thumb + '" class="chat-img-poster-thumb" title="粗サムネのみ表示" style="cursor:default;" oncontextmenu="return false;">';
+      html += '<div class="poster-only-note">粗サムネのみ表示</div>';
+    } else if (msg.image) {
       if (displaySec === 0 && msg.thumb) {
-        // 最初から粗サムネのみ（タップで拡大しない）
         html += '<img src="' + msg.thumb + '" class="chat-img-poster-thumb" title="粗サムネのみ表示" style="cursor:default;" oncontextmenu="return false;">';
         html += '<div class="poster-only-note">粗サムネのみ表示</div>';
       } else {
         html += '<img src="' + msg.image + '" class="chat-img" id="img-' + msg.id + '" onclick="openImageModal(\\'' + msg.id + '\\')" oncontextmenu="return false;">';
       }
+    } else if (msg.thumb) {
+      // 画像URLなし・サムネのみ
+      html += '<img src="' + msg.thumb + '" class="chat-img-poster-thumb" title="粗サムネのみ表示" style="cursor:default;" oncontextmenu="return false;">';
+      html += '<div class="poster-only-note">粗サムネのみ表示</div>';
     }
 
     div.innerHTML = html;
@@ -1189,7 +1227,7 @@ app.get('/', (req, res) => {
     const meta = messageMeta[msgId];
     if (!meta) return;
     // 粗サムネのみ / 既に期限切れのものは拡大モーダルを開かない
-    if (meta.thumbOnly || meta.displaySeconds === 0) return;
+    if (meta.thumbOnly || meta.displaySeconds === 0 || !meta.image) return;
 
     const elapsed = Date.now() - (meta.postedAt || Date.now());
     const remainMs = (meta.displaySeconds * 1000) - elapsed;
@@ -1607,13 +1645,13 @@ io.on('connection', (socket) => {
       senderName: sender ? sender.nickname : '匿名',
       colorIndex: sender ? sender.colorIndex : 0,
       text,
-      image,
+      image: image || null,
       thumb: thumb || null,
       displaySeconds: ds,
       postedAt: Date.now()
     };
 
-    // 表示時間に応じて実画像を削除（タイムラグ許容）
+    // 表示時間に応じて実画像を削除（タイムラグ許容）。image があるときのみ
     if (image) {
       scheduleImageDelete(image, ds);
     }
