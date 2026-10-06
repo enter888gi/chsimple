@@ -147,6 +147,11 @@ app.get('/', (req, res) => {
       overflow: hidden;
     }
     .container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      margin: 0 auto;
       width: 100%;
       max-width: 560px;
       background: var(--card-bg);
@@ -159,7 +164,6 @@ app.get('/', (req, res) => {
       flex-direction: column;
       height: 100%;
       min-height: 0;
-      position: relative;
     }
     .header {
       padding: 6px 10px;
@@ -316,11 +320,12 @@ app.get('/', (req, res) => {
     }
     .typing-indicator { font-size: 0.75rem; color: var(--text-muted); font-style: italic; min-height: 1.1rem; }
     .input-row { display: flex; gap: 8px; align-items: flex-end; }
+    .file-col { display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0; }
     .file-btn { background: #475569; color: white; padding: 12px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; margin: 0; width: auto; height: 44px; display: flex; align-items: center; justify-content: center; }
     .input-row button { margin-top: 0; width: auto; }
     .security-disclaimer { font-size: 0.58rem; color: #94a3b8; line-height: 1.3; margin-top: 2px; padding: 0 2px; }
-    .display-time-row { display: flex; align-items: center; gap: 4px; font-size: 0.68rem; color: var(--text-muted); flex-shrink: 0; }
-    .display-time-row select { width: auto; padding: 2px 4px; margin: 0; font-size: 0.68rem; }
+    .display-time-row { display: flex; align-items: center; justify-content: center; gap: 4px; font-size: 0.62rem; color: var(--text-muted); white-space: nowrap; line-height: 1.1; }
+    .display-time-row select { width: auto; max-width: 78px; padding: 2px 2px; margin: 0; font-size: 0.62rem; }
     #full-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(4px); z-index: 9999; display: none; justify-content: center; align-items: center; }
     .toast-message { background: #ef4444; color: white; padding: 14px 28px; border-radius: 12px; font-weight: bold; font-size: 1rem; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); text-align: center; }
     .modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.75); z-index: 10000; display: none; justify-content: center; align-items: center; }
@@ -385,20 +390,10 @@ app.get('/', (req, res) => {
   <div class="header">
     <div class="header-row header-top">
       <span class="room-name" id="header-room-name" onclick="goHome()">SimpleChatee</span>
-      <span class="version-tag">Ver. 2.0.7</span>
+      <span class="version-tag">Ver. 2.0.8</span>
       <div class="header-sub-info" id="header-room-id-container" style="display: none;">
         <span id="member-count"></span>
         <button class="header-copy-btn" onclick="copyRoomLink()">🔗コピー</button>
-        <div class="display-time-row" id="display-time-control" style="display:none;">
-          <span>画像</span>
-          <select id="image-display-select" onchange="changeImageDisplayTime()">
-            <option value="0">粗サムネのみ</option>
-            <option value="1">1秒</option>
-            <option value="3">3秒</option>
-            <option value="5">5秒</option>
-            <option value="3600">1時間</option>
-          </select>
-        </div>
       </div>
     </div>
     <div class="header-row" id="room-action-container" style="display: none;">
@@ -462,10 +457,22 @@ app.get('/', (req, res) => {
       <div id="file-name-preview" style="font-size: 0.75rem; color: var(--accent-color); display: none;"></div>
       <div id="typing-indicator" class="typing-indicator"></div>
       <div class="input-row">
-        <label class="file-btn">
-          📷
-          <input type="file" id="file-input" accept="image/*" style="display:none;" onchange="onFileSelected(this)">
-        </label>
+        <div class="file-col">
+          <div class="display-time-row" id="display-time-control" style="display:none;">
+            <span>画像表示</span>
+            <select id="image-display-select" onchange="changeImageDisplayTime()">
+              <option value="0">粗サムネのみ</option>
+              <option value="1">1秒</option>
+              <option value="3">3秒</option>
+              <option value="5">5秒</option>
+              <option value="3600">1時間</option>
+            </select>
+          </div>
+          <label class="file-btn">
+            📷
+            <input type="file" id="file-input" accept="image/*" style="display:none;" onchange="onFileSelected(this)">
+          </label>
+        </div>
         <textarea id="msg-input" placeholder="メッセージを入力..." oninput="handleTyping()" onkeydown="onKeyDown(event)"></textarea>
         <button style="margin-top:0; width:auto; padding: 0 16px; height: 44px;" onclick="sendMessage()">送信</button>
       </div>
@@ -502,13 +509,38 @@ app.get('/', (req, res) => {
   function bindVisualViewport() {
     const vv = window.visualViewport;
     const shell = document.querySelector('.container');
-    if (!vv || !shell) return;
+    if (!shell) return;
+
     const sync = function() {
-      shell.style.height = vv.height + 'px';
+      const height = vv ? vv.height : window.innerHeight;
+      const top = vv ? (vv.offsetTop || 0) : 0;
+      shell.style.height = height + 'px';
+      shell.style.top = top + 'px';
     };
-    vv.addEventListener('resize', sync);
-    vv.addEventListener('scroll', sync);
+
+    if (vv) {
+      vv.addEventListener('resize', sync);
+      vv.addEventListener('scroll', sync);
+    }
+    window.addEventListener('resize', sync);
     sync();
+
+    const input = document.getElementById('msg-input');
+    if (!input) return;
+
+    const place = function() {
+      window.scrollTo(0, 0);
+      sync();
+    };
+
+    input.addEventListener('focus', function() {
+      place();
+      setTimeout(place, 60);
+      setTimeout(place, 300);
+    });
+    input.addEventListener('blur', function() {
+      setTimeout(place, 80);
+    });
   }
 
   socket.on('connect', function() {
