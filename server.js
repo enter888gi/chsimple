@@ -260,7 +260,7 @@ app.get('/', (req, res) => {
       <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
       <span class="room-name" id="header-room-name">SimpleChatee</span>
       <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-      <span class="version-tag">Ver. 2.0.9</span>
+      <span class="version-tag">Ver. 2.1.0</span>
     </div>
     <div class="header-members" id="header-room-id-container" style="display:none;">
       <div class="member-block">
@@ -1180,70 +1180,104 @@ io.on('connection', (socket) => {
     if (targetSessionId === room.hostSessionId) return callback({ success: false, error: '自分自身は退室させられません' });
     const target = room.members.find(m => m.sessionId === targetSessionId);
     if (!target || !target.id) return callback({ success: false, error: '対象のメンバーが見つかりません' });
+
     const targetSocket = io.sockets.sockets.get(target.id);
-    if (targetSocket) { targetSocket.emit('force_left'); targetSocket.leave(roomId); targetSocket.data.roomId = null; }
     target.id = null;
+    room.lastActivityAt = Date.now();
+
+    if (targetSocket) {
+      targetSocket.emit('force_left');
+      targetSocket.leave(roomId);
+    }
+
+    const systemMsg = { type: 'system', id: 'system-' + Math.random().toString(36).substring(2, 10), text: target.nickname + ' が退室させられました' };
+    room.messages.push(systemMsg);
+    io.to(roomId).emit('receive_message', systemMsg);
     emitMemberCount(roomId);
     callback({ success: true });
   });
-  socket.on('change_image_display_time', ({ roomId, seconds }) => {
-    const room = rooms[roomId];
-    if (!room || ![0, 1, 3, 5, 3600].includes(seconds)) return;
-    room.imageDisplaySeconds = seconds;
-    room.lastActivityAt = Date.now();
-    let label = seconds + '秒';
-    if (seconds === 0) label = '粗サムネのみ';
-    else if (seconds === 3600) label = '1時間';
-    const systemMsg = { type: 'system', id: 'system-' + Math.random().toString(36).substring(2, 10), text: '画像表示時間が' + label + 'に切り替わりました' };
-    room.messages.push(systemMsg);
-    io.to(roomId).emit('image_display_changed', { seconds: seconds, text: systemMsg.text, id: systemMsg.id });
-  });
-  socket.on('typing_start', ({ roomId }) => {
-    const targetId = roomId || socket.data.roomId;
-    const room = rooms[targetId];
-    if (!room) return;
-    const sender = room.members.find(m => m.id === socket.id);
-    if (sender) socket.to(targetId).emit('display_typing', { nickname: sender.nickname, isTyping: true });
-  });
-  socket.on('typing_stop', ({ roomId }) => {
-    socket.to(roomId || socket.data.roomId).emit('display_typing', { isTyping: false });
-  });
   socket.on('send_message', ({ msgId, roomId, text, image, thumb, displaySeconds }) => {
-    const targetId = roomId || socket.data.roomId;
-    const room = rooms[targetId];
+    const room = rooms[roomId];
     if (!room) return;
-    const sessionId = socket.data.sessionId;
-    let sender = room.members.find(m => m.sessionId === sessionId || m.id === socket.id);
-    if (sender) { sender.id = socket.id; socket.join(targetId); setSocketSession(targetId, sessionId); }
-    room.lastActivityAt = Date.now();
-    const ds = typeof displaySeconds === 'number' ? displaySeconds : room.imageDisplaySeconds;
-    const messageData = {
-      type: 'user', id: msgId || Math.random().toString(36).substring(2, 10), sessionId: sessionId,
-      senderName: sender ? sender.nickname : '匿名', colorIndex: sender ? sender.colorIndex : 0,
-      text, image: image || null, thumb: thumb || null, displaySeconds: ds, postedAt: Date.now()
+    const sender = room.members.find(m => m.sessionId === socket.data.sessionId || m.id === socket.id);
+    if (!sender) return;
+
+    const msg = {
+      id: msgId || Math.random().toString(36).substring(2, 10),
+      sessionId: sender.sessionId,
+      senderName: sender.nickname,
+      colorIndex: sender.colorIndex,
+      text: text || '',
+      image: image || null,
+      thumb: thumb || null,
+      displaySeconds: typeof displaySeconds === 'number' ? displaySeconds : room.imageDisplaySeconds,
+      postedAt: Date.now()
     };
-    if (image) scheduleImageDelete(image, ds);
-    room.messages.push(messageData);
-    io.to(targetId).emit('receive_message', messageData);
+
+    room.messages.push(msg);
+    room.lastActivityAt = Date.now();
+    io.to(roomId).emit('receive_message', msg);
+
+    if (image && msg.displaySeconds !== 0) {
+      scheduleImageDelete(image, msg.displaySeconds);
+    }
   });
   socket.on('delete_message', ({ roomId, msgId }) => {
-    const targetId = roomId || socket.data.roomId;
-    const room = rooms[targetId];
+    const room = rooms[roomId];
     if (!room) return;
-    const targetMsg = room.messages.find(m => m.id === msgId);
-    if (targetMsg && targetMsg.sessionId === socket.data.sessionId) {
-      room.messages = room.messages.filter(m => m.id !== msgId);
-      io.to(targetId).emit('message_deleted', { msgId });
+    const idx = room.messages.findIndex(m => m.id === msgId);
+    if (idx !== -1) {
+      const msg = room.messages[idx];
+      if (msg.sessionId === socket.data.sessionId || room.hostSessionId === socket.data.sessionId) {
+        if (msg.image) {
+          const filePath = path.join(uploadDir, path.basename(msg.image));
+          if (fs.existsSync(filePath)) fs.unlink(filePath, () => {});
+        }
+        room.messages.splice(idx, 1);
+        io.to(roomId).emit('message_deleted', { msgId });
+      }
     }
+  });
+  socket.on('change_image_display_time', ({ roomId, seconds }) => {
+    const room = rooms[roomId];
+    if (!room) return;
+    const sec = parseInt(seconds, 10);
+    if (isNaN(sec) || ![0, 1, 3, 5, 3600].includes(sec)) return;
+    room.imageDisplaySeconds = sec;
+    room.lastActivityAt = Date.now();
+    const systemMsg = {
+      type: 'system',
+      id: 'system-' + Math.random().toString(36).substring(2, 10),
+      text: '画像表示時間が「' + (sec === 0 ? '粗サムネのみ' : (sec === 3600 ? '1時間' : sec + '秒')) + '」に変更されました'
+    };
+    room.messages.push(systemMsg);
+    io.to(roomId).emit('image_display_changed', { seconds: sec, text: systemMsg.text, id: systemMsg.id });
+  });
+  socket.on('typing_start', ({ roomId }) => {
+    const room = rooms[roomId];
+    if (!room) return;
+    const sender = room.members.find(m => m.sessionId === socket.data.sessionId || m.id === socket.id);
+    if (sender) {
+      socket.to(roomId).emit('display_typing', { isTyping: true, nickname: sender.nickname });
+    }
+  });
+  socket.on('typing_stop', ({ roomId }) => {
+    socket.to(roomId).emit('display_typing', { isTyping: false });
   });
   socket.on('disconnect', () => {
     const roomId = socket.data.roomId;
     if (roomId && rooms[roomId]) {
-      const member = rooms[roomId].members.find(m => m.id === socket.id);
-      if (member) { member.id = null; emitMemberCount(roomId); }
+      const room = rooms[roomId];
+      const member = room.members.find(m => m.id === socket.id);
+      if (member) {
+        member.id = null;
+        emitMemberCount(roomId);
+      }
     }
   });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => { console.log('Server running on port ' + PORT); });
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
