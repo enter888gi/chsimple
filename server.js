@@ -4,7 +4,7 @@ const { Server } = require('socket.io');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
- 
+
 const app = Express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 35e6 });
@@ -234,6 +234,14 @@ app.get('/', (req, res) => {
       line-height: 1.45;
       margin-bottom: 10px;
     }
+    .home-subtitle {
+      text-align: center;
+      margin-top: -12px;
+      margin-bottom: 18px;
+      font-size: 0.78rem;
+      color: #94a3b8;
+      line-height: 1.5;
+    }
     .public-status {
       font-size: 0.8rem;
       color: #cbd5e1;
@@ -361,7 +369,7 @@ app.get('/', (req, res) => {
       <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
       <span class="room-name" id="header-room-name">SimpleChatee</span>
       <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-      <span class="version-tag">Ver. 2.0.10</span>
+      <span class="version-tag">Ver. 2.0.11</span>
     </div>
     <div class="header-members" id="header-room-id-container" style="display:none;">
       <div class="member-block">
@@ -377,6 +385,7 @@ app.get('/', (req, res) => {
   </div>
   <div id="view-home" class="view active">
     <h2 class="home-title">SimpleChatee</h2>
+    <p class="home-subtitle">画像の表示時間を選んで気軽に投稿</p>
 
     <!-- 公開ルーム -->
     <div class="section-card" id="public-room-section">
@@ -385,7 +394,7 @@ app.get('/', (req, res) => {
         <span class="dot" aria-hidden="true"></span>
         <span id="public-room-status">入室中: — 人</span>
       </div>
-      <p class="section-desc">誰でも自由に入れる共通の集合場所です。気軽に雑談できます。ニックネームを決めてすぐに入室できます。</p>
+      <p class="section-desc">誰でもニックネームだけで自由に入れます。プライベートルームへの誘導や待ち合わせもOK。</p>
       <button type="button" onclick="enterPublicRoom()">公開ルームに入室</button>
     </div>
 
@@ -590,9 +599,13 @@ app.get('/', (req, res) => {
     if (publicCountTimer) { clearInterval(publicCountTimer); publicCountTimer = null; }
   }
   function enterPublicRoom() {
-    const nick = prompt('ニックネームを入力してください', 'ゲスト');
+    const nick = prompt('ニックネームを入力してください', '');
     if (nick === null) return;
-    myNickname = (nick || 'ゲスト').trim().substring(0, 20) || 'ゲスト';
+    myNickname = nick.trim().substring(0, 20);
+    if (!myNickname) {
+      alert('ニックネームを入れてください');
+      return;
+    }
     currentRoomId = PUBLIC_ROOM_ID;
     currentRoomName = '公開ルーム';
     currentKey = PUBLIC_ROOM_KEY;
@@ -716,7 +729,7 @@ app.get('/', (req, res) => {
   function generateKey() {
     const wa = CryptoJS.lib.WordArray.random(16);
     const b64 = CryptoJS.enc.Base64.stringify(wa);
-    return b64.replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
+    return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
   function getOrCreateSessionId() {
     let sid = sessionStorage.getItem('userSessionId');
