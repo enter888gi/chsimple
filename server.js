@@ -1,3 +1,4 @@
+
 const Express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -301,9 +302,10 @@ app.get('/', (req, res) => {
     .message .del-btn { position: absolute; top: 4px; right: 8px; cursor: pointer; color: #fca5a5; font-size: 0.75rem; opacity: 0.85; }
     .system-notification { text-align: center; font-size: 0.75rem; color: var(--text-muted); margin: 4px 0; align-self: center; }
     .chat-img { max-width: 100%; max-height: 200px; border-radius: 8px; margin-top: 6px; cursor: pointer; user-select: none; -webkit-user-drag: none; display: block; }
-    .chat-img-poster-thumb { width: 100px; height: auto; border-radius: 6px; margin-top: 6px; image-rendering: pixelated; border: 1px dashed #94a3b8; opacity: 0.85; display: block; }
+    .chat-img-poster-thumb { width: 140px; height: auto; max-width: 100%; border-radius: 6px; margin-top: 6px; image-rendering: pixelated; border: 1px dashed #94a3b8; opacity: 0.85; display: block; }
     .expired-img-note { font-size: 0.72rem; color: #f87171; font-style: italic; margin-top: 4px; }
     .poster-only-note { font-size: 0.68rem; color: #94a3b8; margin-top: 2px; }
+    .message-timestamp { font-size: 0.62rem; color: #94a3b8; margin-top: 5px; align-self: flex-end; line-height: 1.2; }
     .input-area { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px calc(4px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border-color); flex-shrink: 0; background: var(--card-bg); }
     .typing-indicator { font-size: 0.75rem; color: var(--text-muted); font-style: italic; min-height: 0.2rem; }
     .display-time-row { display: flex; align-items: center; gap: 6px; font-size: 0.68rem; color: var(--text-muted); }
@@ -368,7 +370,7 @@ app.get('/', (req, res) => {
       <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
       <span class="room-name" id="header-room-name">SimpleChatee</span>
       <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-      <span class="version-tag">Ver. 2.0.12</span>
+      <span class="version-tag">Ver. 2.0.13</span>
     </div>
     <div class="header-members" id="header-room-id-container" style="display:none;">
       <div class="member-block">
@@ -1255,6 +1257,19 @@ app.get('/', (req, res) => {
       html += '<img src="' + msg.thumb + '" class="chat-img-poster-thumb" style="cursor:default;" oncontextmenu="return false;">';
       html += '<div class="poster-only-note">粗サムネのみ表示</div>';
     }
+
+    // 投稿日時をローカル時間で表示（例：2026/10/14 10:10:45）
+    const date = new Date(postedAt);
+    const pad2 = n => String(n).padStart(2, '0');
+    const timestamp =
+      date.getFullYear() + '/' +
+      pad2(date.getMonth() + 1) + '/' +
+      pad2(date.getDate()) + ' ' +
+      pad2(date.getHours()) + ':' +
+      pad2(date.getMinutes()) + ':' +
+      pad2(date.getSeconds());
+    html += '<div class="message-timestamp">(' + timestamp + ')</div>';
+
     div.innerHTML = html;
     container.appendChild(div);
     scrollMessageFully(div);
