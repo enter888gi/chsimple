@@ -34,7 +34,7 @@ app.get('/api/ping', (req, res) => {
 const rooms = {};
 const roomNameToId = {};
 
-/** 公開ルーム（固定ID） */
+/* 公開ルーム（固定ID） */
 const PUBLIC_ROOM_ID = 'public';
 const PUBLIC_ROOM_NAME = '公開ルーム';
 const PUBLIC_ROOM_MAX = 50;
