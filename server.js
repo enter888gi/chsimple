@@ -95,7 +95,6 @@ function getPublicRoomCount() {
   return getActiveMembers(room).length;
 }
 
-// 誰でも見られるルーム一覧を返すAPI
 app.get('/api/rooms', (req, res) => {
   ensurePublicRoom();
   const list = [];
@@ -168,9 +167,7 @@ app.get('/api/public-count', (req, res) => {
   res.json({ count: getPublicRoomCount(), maxMembers: PUBLIC_ROOM_MAX });
 });
 
-app.get('/', (req, res) => {
-  res.send(`
-<!DOCTYPE html>
+const HTML_CONTENT = `<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
@@ -639,13 +636,13 @@ app.get('/', (req, res) => {
         const card = document.createElement('div');
         card.className = 'room-card';
         card.onclick = function() { selectRoomFromList(r.id, r.name); };
-        card.innerHTML = `
+        card.innerHTML = \`
           <div class="room-card-info">
-            <div class="room-card-name">${escapeHtml(r.name)}</div>
-            <div class="room-card-meta">入室中: ${r.activeCount}/${r.maxMembers}人${r.waitingMsg ? ' | ' + escapeHtml(r.waitingMsg) : ''}</div>
+            <div class="room-card-name">\${escapeHtml(r.name)}</div>
+            <div class="room-card-meta">入室中: \${r.activeCount}/\${r.maxMembers}人\${r.waitingMsg ? ' | ' + escapeHtml(r.waitingMsg) : ''}</div>
           </div>
           <span style="font-size:0.8rem;color:var(--accent-color);flex-shrink:0;">参加 →</span>
-        `;
+        \`;
         listEl.appendChild(card);
       });
     }).catch(function() {});
@@ -842,7 +839,7 @@ app.get('/', (req, res) => {
     if (typeof CryptoJS !== 'undefined' && CryptoJS.lib && CryptoJS.lib.WordArray) {
       const wa = CryptoJS.lib.WordArray.random(16);
       const b64 = CryptoJS.enc.Base64.stringify(wa);
-      return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      return b64.replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
     }
     const arr = new Uint8Array(16);
     if (window.crypto && window.crypto.getRandomValues) {
@@ -852,7 +849,7 @@ app.get('/', (req, res) => {
     }
     let s = '';
     for (let i = 0; i < arr.length; i++) s += String.fromCharCode(arr[i]);
-    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return btoa(s).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
   }
   function getOrCreateSessionId() {
     let sid = sessionStorage.getItem('userSessionId');
@@ -1310,14 +1307,14 @@ app.get('/', (req, res) => {
       messageMeta[msg.id] = { image: msg.image || null, thumb: msg.thumb || null, displaySeconds: displaySec, postedAt: postedAt, thumbOnly: displaySec === 0 || !msg.image };
     }
     let html = '';
-    if (isSelf) html += '<span class="del-btn" onclick="deleteMessage(\'' + msg.id + '\')">✕</span>';
+    if (isSelf) html += '<span class="del-btn" onclick="deleteMessage(\\'' + msg.id + '\\')">✕</span>';
     html += '<div class="sender">' + escapeHtml(msg.senderName) + '</div>';
     if (plainText) html += '<div class="text-content">' + escapeHtml(plainText) + '</div>';
     if (displaySec === 0 && msg.thumb) {
       html += '<img src="' + msg.thumb + '" class="chat-img-poster-thumb" style="cursor:default;" oncontextmenu="return false;">';
       html += '<div class="poster-only-note">粗サムネのみ表示</div>';
     } else if (msg.image) {
-      html += '<img src="' + msg.image + '" class="chat-img" id="img-' + msg.id + '" onclick="openImageModal(\'' + msg.id + '\')" oncontextmenu="return false;">';
+      html += '<img src="' + msg.image + '" class="chat-img" id="img-' + msg.id + '" onclick="openImageModal(\\'' + msg.id + '\\')" oncontextmenu="return false;">';
     } else if (msg.thumb) {
       html += '<img src="' + msg.thumb + '" class="chat-img-poster-thumb" style="cursor:default;" oncontextmenu="return false;">';
       html += '<div class="poster-only-note">粗サムネのみ表示</div>';
@@ -1409,8 +1406,10 @@ app.get('/', (req, res) => {
   }
 </script>
 </body>
-</html>
-  `);
+</html>`;
+
+app.get('/', (req, res) => {
+  res.send(HTML_CONTENT);
 });
 
 function safeCallback(callback, payload) {
