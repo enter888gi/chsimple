@@ -678,7 +678,6 @@ app.get('/', (req, res) => {
     } else {
       currentKey = '';
     }
-    // 待機メッセージの取得確認のため一度サーバーに問い合わせ、join viewへ
     socket.emit('get_room_info', { roomId: roomId }, function(res) {
       if (res && res.waitingMsg) {
         const banner = document.getElementById('room-waiting-banner');
@@ -843,7 +842,7 @@ app.get('/', (req, res) => {
     if (typeof CryptoJS !== 'undefined' && CryptoJS.lib && CryptoJS.lib.WordArray) {
       const wa = CryptoJS.lib.WordArray.random(16);
       const b64 = CryptoJS.enc.Base64.stringify(wa);
-      return b64.replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
+      return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     }
     const arr = new Uint8Array(16);
     if (window.crypto && window.crypto.getRandomValues) {
@@ -853,7 +852,7 @@ app.get('/', (req, res) => {
     }
     let s = '';
     for (let i = 0; i < arr.length; i++) s += String.fromCharCode(arr[i]);
-    return btoa(s).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
   function getOrCreateSessionId() {
     let sid = sessionStorage.getItem('userSessionId');
@@ -1170,7 +1169,6 @@ app.get('/', (req, res) => {
     });
   }
 
-  // 🔗コピーボタンを押したらショートURL化した状態でコピーされるように
   function copyRoomLink() {
     if (isPublicRoom || currentRoomId === PUBLIC_ROOM_ID) return;
     const shortRandom = Math.random().toString(36).substring(2, 8);
@@ -1312,14 +1310,14 @@ app.get('/', (req, res) => {
       messageMeta[msg.id] = { image: msg.image || null, thumb: msg.thumb || null, displaySeconds: displaySec, postedAt: postedAt, thumbOnly: displaySec === 0 || !msg.image };
     }
     let html = '';
-    if (isSelf) html += '<span class="del-btn" onclick="deleteMessage(\\'' + msg.id + '\\')">✕</span>';
+    if (isSelf) html += '<span class="del-btn" onclick="deleteMessage(\'' + msg.id + '\')">✕</span>';
     html += '<div class="sender">' + escapeHtml(msg.senderName) + '</div>';
     if (plainText) html += '<div class="text-content">' + escapeHtml(plainText) + '</div>';
     if (displaySec === 0 && msg.thumb) {
       html += '<img src="' + msg.thumb + '" class="chat-img-poster-thumb" style="cursor:default;" oncontextmenu="return false;">';
       html += '<div class="poster-only-note">粗サムネのみ表示</div>';
     } else if (msg.image) {
-      html += '<img src="' + msg.image + '" class="chat-img" id="img-' + msg.id + '" onclick="openImageModal(\\'' + msg.id + '\\')" oncontextmenu="return false;">';
+      html += '<img src="' + msg.image + '" class="chat-img" id="img-' + msg.id + '" onclick="openImageModal(\'' + msg.id + '\')" oncontextmenu="return false;">';
     } else if (msg.thumb) {
       html += '<img src="' + msg.thumb + '" class="chat-img-poster-thumb" style="cursor:default;" oncontextmenu="return false;">';
       html += '<div class="poster-only-note">粗サムネのみ表示</div>';
@@ -1532,7 +1530,6 @@ io.on('connection', (socket) => {
       const activeMembers = getActiveMembers(room);
       const isRegistered = room.joinedSessionIds && room.joinedSessionIds.includes(sessionId);
 
-      // 一度満員になってから外の人が新規に入れない（既に参加実績のあるメンバーならOK）
       if (!existingMember && !isRegistered && activeMembers.length >= room.maxMembers) {
         socket.emit('room_full_rejected');
         return safeCallback(callback, { success: false, full: true, error: '一度満員になったため新規参加できません' });
