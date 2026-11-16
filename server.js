@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 
 const app = Express();
+app.use(Express.json({ limit: '100kb' }));
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 35e6, pingInterval: 25000, pingTimeout: 60000, connectionStateRecovery: { maxDisconnectionDuration: 2 * 60 * 1000, skipMiddlewares: true }});
 /* Ver.2.3.0 変更点:
@@ -15,7 +16,8 @@ const io = new Server(server, { maxHttpBufferSize: 35e6, pingInterval: 25000, pi
    4) 再同期は直近100件だけ・プライベート履歴は300件でローテーション
    5) クライアント再接続は無制限リトライ＋自動の静かな復帰入室
    6) プルリフレッシュの発動距離を 36px -> 80px に引き上げ
-   7) 画像タップは同タブのモーダルではなく別タブの専用viewerで開く */
+   7) 画像タップは同タブのモーダルではなく別タブの専用viewerで開く
+   8) Ver.2.3.1: 保存済み部屋をサーバー存在チェックで自動掃除し、消えた部屋をトップに残さない */
 const DISCONNECT_GRACE_MS = 90 * 1000;
 const SYNC_MESSAGE_LIMIT = 100;
 const PRIVATE_HISTORY_LIMIT = 300;
@@ -163,6 +165,26 @@ waitingMsg: r.waitingMsg || ''
 res.json({ rooms: list});
 });
 
+/* Ver.2.3.1: 部屋の存在チェック。Ver.2.3.2以降クライアントからは定期ポーリングしない (手動確認用に残置)。
+   サーバーが「無い」と断定した部屋だけを消す。通信失敗時はクライアント側で消さない。 */
+function roomExistsMap(ids) {
+ensurePublicRoom();
+const out = {};
+(Array.isArray(ids)? ids: []).slice(0, 50).forEach(raw => {
+const id = String(raw || '').trim();
+if (id) out[id] = !!rooms[id];
+});
+return out;
+}
+app.post('/api/rooms/check', (req, res) => {
+const ids = (req.body && req.body.roomIds) || [];
+res.json({ exists: roomExistsMap(ids) });
+});
+app.get('/api/rooms/check', (req, res) => {
+const ids = String(req.query.ids || '').split(',').filter(Boolean);
+res.json({ exists: roomExistsMap(ids) });
+});
+
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 setInterval(() => {
 const now = Date.now();
@@ -176,6 +198,10 @@ if (msg.image) {
 const filename = path.basename(msg.image);
 const filePath = path.join(uploadDir, filename);
 if (fs.existsSync(filePath)) fs.unlink(filePath, () => {});
+}
+if (msg.thumbMid) {
+const thumbPath = path.join(uploadDir, path.basename(msg.thumbMid));
+if (fs.existsSync(thumbPath)) fs.unlink(thumbPath, () => {});
 }
 });
 if (room.name && roomNameToId[room.name] === roomId) {
@@ -341,27 +367,31 @@ font-weight: 600;
 white-space: nowrap;
 flex-shrink: 0;
 }
-#chat-messages { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 12px; padding: 36px 10px 48px;}
+#chat-messages { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 8px; padding: 36px 10px 48px;}
 .pull-indicator { position: absolute; top: 6px; left: 0; right: 0; display: none; justify-content: center; z-index: 3; pointer-events: none;}
 .pull-indicator.show { display: flex;}
 .spinner { width: 18px; height: 18px; border: 2px solid #334155; border-top-color: var(--accent-color); border-radius: 50%; animation: spin 0.7s linear infinite;}
 @keyframes spin { to { transform: rotate(360deg);}}
-.message { display: flex; flex-direction: column; width: fit-content; max-width: 80%; padding: 8px 12px; border-radius: 12px; position: relative; word-break: break-word; align-self: flex-start; font-size: 0.85rem; line-height: 1.4;}
+.message { display: flex; flex-direction: column; width: fit-content; max-width: 80%; padding: 6px 10px; border-radius: 12px; position: relative; word-break: break-word; align-self: flex-start; font-size: 0.85rem; line-height: 1.4;}
 .message.self { align-self: flex-end; background: #0284c7; color: white;}
-.message.self.sender { color: #e0f2fe;}
+.message.self .sender { color: #e0f2fe;}
 .message.user-color-0 { background: #334155; color: #f8fafc;}
 .message.user-color-1 { background: #1e3a29; color: #f8fafc; border: 1px solid #2e5d40;}
 .message.user-color-2 { background: #3b2f1e; color: #f8fafc; border: 1px solid #5d4a2e;}
 .message.user-color-3 { background: #2e1e3b; color: #f8fafc; border: 1px solid #4a2e5d;}
-.message.sender { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px; padding-right: 20px; font-weight: bold;}
-.message.text-content { white-space: pre-wrap;}
-.message.del-btn { position: absolute; top: 4px; right: 8px; cursor: pointer; color: #fca5a5; font-size: 0.75rem; opacity: 0.85;}
+.message .sender { font-size: 0.75rem; color: var(--text-muted); font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+.message .text-content { white-space: pre-wrap;}
+.message .del-btn { margin-left: auto; cursor: pointer; color: #fca5a5; font-size: 0.75rem; opacity: 0.85; flex-shrink: 0; padding-left: 8px;}
 .system-notification { text-align: center; font-size: 0.75rem; color: var(--text-muted); margin: 4px 0; align-self: center;}
 .chat-img { max-width: 100%; max-height: 200px; border-radius: 8px; margin-top: 6px; cursor: pointer; user-select: none; -webkit-user-drag: none; display: block;}
 .chat-img-poster-thumb { width: 140px; height: auto; max-width: 100%; border-radius: 6px; margin-top: 6px; image-rendering: pixelated; border: 1px dashed #94a3b8; opacity: 0.85; display: block;}
 .expired-img-note { font-size: 0.72rem; color: #f87171; font-style: italic; margin-top: 4px;}
 .poster-only-note { font-size: 0.68rem; color: var(--text-muted); margin-top: 2px;}
-.message-timestamp { font-size: 0.62rem; color: var(--text-muted); margin-top: 5px; align-self: flex-end; line-height: 1.2;}
+.message-timestamp { font-size: 0.62rem; color: var(--text-muted); line-height: 1.2; white-space: nowrap;}
+.msg-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px;}
+.img-wrap { position: relative; display: inline-block; max-width: 100%; margin-top: 6px;}
+.img-wrap .chat-img { margin-top: 0;}
+.img-badge { position: absolute; top: 6px; left: 6px; background: rgba(2,6,23,0.72); color: #e2e8f0; font-size: 0.65rem; padding: 2px 7px; border-radius: 999px; pointer-events: none;}
 .input-area { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px calc(4px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border-color); flex-shrink: 0; background: var(--card-bg);}
 .typing-indicator { font-size: 0.75rem; color: var(--text-muted); font-style: italic; min-height: 0.2rem;}
 .display-time-row { display: flex; align-items: center; gap: 6px; font-size: 0.68rem; color: var(--text-muted);}
@@ -427,7 +457,7 @@ flex-shrink: 0;
 <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
 <span class="room-name" id="header-room-name">SimpleChatee</span>
 <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-<span class="version-tag">Ver. 2.3.0</span>
+<span class="version-tag">Ver. 2.3.7</span>
 </div>
 <div class="header-members" id="header-room-id-container" style="display:none;">
 <div class="member-block">
@@ -515,6 +545,7 @@ flex-shrink: 0;
 <select id="image-display-select" onchange="changeImageDisplayTime()">
 <option value="0">粗サムネのみ</option>
 <option value="1">1秒</option>
+<option value="2">2秒</option>
 <option value="3">3秒</option>
 <option value="5">5秒</option>
 <option value="10">10秒</option>
@@ -687,6 +718,18 @@ fetch('/api/rooms').then(function(r) { return r.json();}).then(function(data) {
 const listEl = document.getElementById('home-room-list');
 if (!listEl) return;
 const rooms = (data && Array.isArray(data.rooms))? data.rooms: [];
+/* Ver.2.3.1: サーバーの部屋一覧に無い保存済み部屋は消えた部屋として掃除する */
+try {
+if (!data || !Array.isArray(data.rooms)) throw new Error('no rooms array');
+const serverIds = {};
+rooms.forEach(function(r) { serverIds[r.id] = true; });
+const savedIds = Object.keys(getSavedRooms()).filter(function(id) { return id !== PUBLIC_ROOM_ID; });
+if (savedIds.length) {
+const existsMap = {};
+savedIds.forEach(function(id) { existsMap[id] = !!serverIds[id]; });
+pruneSavedRoomsByExistsMap(existsMap);
+}
+} catch (e) {}
 const validRooms = rooms.filter(r =>!isRoomBanned(r.id));
 if (validRooms.length === 0) {
 listEl.innerHTML = '<div style="font-size:0.75rem; color:var(--text-muted); text-align:center; padding:8px;">現在作成されている部屋はありません</div>';
@@ -737,6 +780,13 @@ isHost =!!saved.isHost;
 currentKey = '';
 }
 socket.emit('get_room_info', { roomId: roomId}, function(res) {
+if (res && res.exists === false) {
+removeRoomFromStorage(roomId);
+renderSavedRoomsList();
+alert('この部屋はもう存在しません。一覧から削除しました。');
+goHome(true);
+return;
+}
 if (res && res.waitingMsg) {
 const banner = document.getElementById('room-waiting-banner');
 banner.textContent = '待機メッセージ: ' + res.waitingMsg;
@@ -852,6 +902,14 @@ if (!msg) return;
 if (msg.type === 'system') renderSystemNotification(msg.text, msg.id);
 else { noteActivity(); renderSingleMessage(msg, false);}
 });
+socket.on('image_restored', function(data) {
+if (!data || !data.msgId) return;
+restoreImage(data.msgId, true);
+});
+socket.on('image_expired_now', function(data) {
+if (!data || !data.msgId) return;
+expireImageNow(data.msgId, true);
+});
 socket.on('message_deleted', function(data) {
 const el = document.getElementById('msg-' + data.msgId);
 if (el) el.remove();
@@ -870,6 +928,13 @@ renderSystemNotification(data.text, data.id);
 });
 socket.on('display_typing', function(data) {
 document.getElementById('typing-indicator').innerText = data.isTyping? (data.nickname + ' が入力中...'): '';
+});
+socket.on('room_not_found', function(data) {
+const rid = (data && data.roomId) || currentRoomId;
+if (rid) removeRoomFromStorage(rid);
+renderSavedRoomsList();
+alert('この部屋はもう存在しません。一覧から削除しました。');
+goHome(true);
 });
 socket.on('room_deleted_by_host', function(data) {
 const reason = (data && data.reason === 'inactivity')? '1ヶ月間無発話のため、部屋は自動削除されました。': '部屋主によってこの部屋は削除されました。';
@@ -962,6 +1027,44 @@ return sid;
 }
 try { userSessionId = getOrCreateSessionId();} catch (e) { userSessionId = generateSessionId();}
 
+/* Ver.2.3.3: 中サイズサムネ (長辺720px / JPEG 0.72) を Blob で作る。
+   インライン表示はこちらを使い、原画はタップした人だけが viewer で読む。
+   Base64にはしない (メッセージ/履歴/再同期が太るため)。ファイルとして上げてURLだけ載せる。
+   小さい画像や、作っても小さくならない場合は null (原画表示にフォールバック)。 */
+function createMidThumbnailBlob(file) {
+return new Promise((resolve) => {
+try {
+if (!file || !file.type || file.type.indexOf('image/') !== 0) return resolve(null);
+if (file.size <= 300 * 1024) return resolve(null);
+const reader = new FileReader();
+reader.onerror = () => resolve(null);
+reader.onload = (e) => {
+const img = new Image();
+img.onerror = () => resolve(null);
+img.onload = () => {
+try {
+const maxDim = 720;
+const longest = Math.max(img.width, img.height);
+const scale = longest > maxDim ? maxDim / longest : 1;
+const canvas = document.createElement('canvas');
+canvas.width = Math.max(1, Math.round(img.width * scale));
+canvas.height = Math.max(1, Math.round(img.height * scale));
+const ctx = canvas.getContext('2d');
+ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+if (!canvas.toBlob) return resolve(null);
+canvas.toBlob((blob) => {
+if (!blob) return resolve(null);
+if (blob.size >= file.size * 0.9) return resolve(null);
+resolve(blob);
+}, 'image/jpeg', 0.72);
+} catch (err) { resolve(null); }
+};
+img.src = e.target.result;
+};
+reader.readAsDataURL(file);
+} catch (err) { resolve(null); }
+});
+}
 function createUltraLightThumbnail(file) {
 return new Promise((resolve) => {
 const reader = new FileReader();
@@ -1012,6 +1115,25 @@ delete store[roomId];
 localStorage.setItem('myJoinedRooms', JSON.stringify(store));
 } catch (e) {}
 }
+/* Ver.2.3.1: サーバーに実在しない保存済み部屋を localStorage から消す。
+   existsMap で false と断定された部屋だけ消す。通信失敗では呼ばれない=誤削除しない。 */
+function pruneSavedRoomsByExistsMap(existsMap) {
+if (!existsMap) return;
+try {
+const store = getSavedRooms();
+let changed = false;
+Object.keys(existsMap).forEach(function(id) {
+if (existsMap[id] === false && store[id]) { delete store[id]; changed = true; logEventClientPrune(id); }
+});
+if (changed) {
+localStorage.setItem('myJoinedRooms', JSON.stringify(store));
+renderSavedRoomsList();
+}
+} catch (e) {}
+}
+function logEventClientPrune(roomId) { try { clientLog('saved_room_pruned', roomId); } catch (e) {} }
+/* Ver.2.3.2: 存在チェックAPIの定期ポーリングは廃止。掃除は (1)既に取得している部屋一覧との照合 (追加通信なし) と
+   (2)「部屋が存在しません」と分かった時 (タップ/入室/再接続時) の削除だけで行う。 */
 function renderSavedRoomsList() {
 const store = getSavedRooms();
 const container = document.getElementById('my-rooms-list');
@@ -1200,6 +1322,12 @@ setupChatView(currentRoomId, currentRoomName, res.messages || [], currentMaxMemb
 if (isHost) startKeepAlive();
 window.history.pushState({}, '', buildRoomUrl(currentRoomId, currentKey));
 } else if (res.full) showToast('現在満員です', function() { goHome(true);});
+else if (res.exists === false) {
+if (currentRoomId) removeRoomFromStorage(currentRoomId);
+renderSavedRoomsList();
+alert('この部屋はもう存在しません。一覧から削除しました。');
+goHome(true);
+}
 else alert(res.error || '入室に失敗しました');
 });
 }
@@ -1284,7 +1412,7 @@ alert('ショートURLをコピーしました！');
 
 function changeImageDisplayTime() {
 const seconds = parseInt(document.getElementById('image-display-select').value, 10);
-if (isNaN(seconds) || ![0, 1, 3, 5, 10, 3600].includes(seconds)) return;
+if (isNaN(seconds) || ![0, 1, 2, 3, 5, 10, 3600].includes(seconds)) return;
 noteActivity();
 socket.emit('change_image_display_time', { roomId: currentRoomId, seconds: seconds});
 }
@@ -1326,6 +1454,7 @@ async function sendMessage() {
 const input = document.getElementById('msg-input');
 const text = input.value.trim();
 let imageUrl = null;
+let thumbMidUrl = null;
 let thumbBase64 = null;
 if (!text &&!selectedFile) return;
 if (!currentKey) return alert('暗号化鍵がありません');
@@ -1343,6 +1472,17 @@ const res = await fetch('/api/upload', { method: 'POST', body: formData});
 const data = await res.json();
 imageUrl = data.imageUrl;
 } catch (e) { alert('画像のアップロードに失敗しました'); return;}
+/* 中サムネもファイルとして上げる。失敗しても送信自体は止めず原画表示にフォールバック */
+try {
+const midBlob = await createMidThumbnailBlob(selectedFile);
+if (midBlob) {
+const midForm = new FormData();
+midForm.append('image', midBlob, 'thumb.jpg');
+const midRes = await fetch('/api/upload', { method: 'POST', body: midForm });
+const midData = await midRes.json();
+if (midData && midData.imageUrl) thumbMidUrl = midData.imageUrl;
+}
+} catch (e) {}
 }
 }
 socket.emit('send_message', {
@@ -1350,6 +1490,7 @@ msgId: Math.random().toString(36).substring(2, 10),
 roomId: currentRoomId,
 text: text? encryptText(text, currentKey): '',
 image: imageUrl,
+thumbMid: thumbMidUrl,
 thumb: thumbBase64,
 displaySeconds: displaySeconds
 });
@@ -1406,17 +1547,24 @@ note.addEventListener('click', function(e) { handleExpiredThumbClick(e, msgId);}
 imgEl.parentNode.appendChild(note);
 }
 /* Ver.2.2.0: 原画表示中を即座に粗サムネ化する */
-function expireImageNow(msgId) {
+/* Ver.2.3.5: 即時粗サムネ化も全員反映できるが、有効化できるのは投稿者だけ。
+   他の人が操作した場合は従来通り自分の画面だけに効く (サーバーへは送らない)。 */
+function expireImageNow(msgId, fromServer) {
 const meta = messageMeta[msgId];
 const imgEl = document.getElementById('img-' + msgId);
 if (!meta ||!imgEl || imgEl.dataset.expired === '1') return;
 clearImageExpireTimer(msgId);
 handleImageExpire(imgEl, msgId, meta.thumb || null);
+if (!fromServer && meta.senderSessionId && meta.senderSessionId === userSessionId) {
+try { socket.emit('expire_image', { roomId: currentRoomId, msgId: msgId }); } catch (e) {}
+}
 }
 /* Ver.2.2.0: 粗サムネ化した原画を復元する。
 期限は「投稿から1時間まで」（サーバー削除と一致）。1時間経過後は復元不可。
-0秒（粗サムネのみ・原画未アップロード）は対象外。操作した本人の画面だけに効く。 */
-function restoreImage(msgId) {
+0秒（粗サムネのみ・原画未アップロード）は対象外。
+Ver.2.3.4: 本人の操作はサーバーへ通知し、部屋全員と後からの入室者にも反映する。
+サーバーからの通知で復元する場合は再通知しない (fromServer=true)。 */
+function restoreImage(msgId, fromServer) {
 const meta = messageMeta[msgId];
 if (!meta || meta.thumbOnly ||!meta.image) return;
 if (Date.now() - (meta.postedAt || Date.now()) >= 3600 * 1000) return;
@@ -1430,6 +1578,9 @@ meta.expired = false;
 meta.displaySeconds = 3600;
 startImageExpireTimer(imgEl, msgId, meta.thumb || null, 3600, meta.postedAt, true);
 scrollMessageFully(container);
+if (!fromServer && meta.senderSessionId && meta.senderSessionId === userSessionId) {
+try { socket.emit('restore_image', { roomId: currentRoomId, msgId: msgId }); } catch (e) {}
+}
 }
 function startImageExpireTimer(imgEl, msgId, thumbBase64, displaySec, postedAt, isHistory) {
 if (!imgEl || displaySec <= 0) return;
@@ -1457,6 +1608,7 @@ startFromVisible();
 imageExpireObservers[msgId] = observer;
 observer.observe(imgEl);
 }
+function formatSecondsLabel(sec) { return sec >= 3600? '1時間': (sec + '秒'); }
 function renderSingleMessage(msg, isHistory) {
 const container = document.getElementById('chat-messages');
 if (document.getElementById('msg-' + msg.id)) return;
@@ -1466,37 +1618,32 @@ div.className = 'message ' + (isSelf? 'self': ('user-color-' + (msg.colorIndex |
 div.id = 'msg-' + msg.id;
 const plainText = msg.text? decryptText(msg.text, currentKey): '';
 const displaySec = (typeof msg.displaySeconds === 'number')? msg.displaySeconds: currentImageDisplaySeconds;
+const originalDisplaySec = (typeof msg.originalDisplaySeconds === 'number')? msg.originalDisplaySeconds: displaySec;
 const postedAt = msg.postedAt || Date.now();
 if (msg.image || msg.thumb) {
-messageMeta[msg.id] = { image: msg.image || null, thumb: msg.thumb || null, displaySeconds: displaySec, postedAt: postedAt, thumbOnly: displaySec === 0 ||!msg.image, expired: false};
+messageMeta[msg.id] = { image: msg.image || null, thumbMid: msg.thumbMid || null, thumb: msg.thumb || null, displaySeconds: displaySec, postedAt: postedAt, senderSessionId: msg.sessionId || null, originalDisplaySeconds: originalDisplaySec, thumbOnly: displaySec === 0 ||!msg.image, expired: false};
 }
 let html = '';
-if (isSelf) html += '<span class="del-btn" onclick="deleteMessage(\\'' + msg.id + '\\')">✕</span>';
-html += '<div class="sender">' + escapeHtml(msg.senderName) + '</div>';
+const date = new Date(postedAt);
+const pad2 = n => String(n).padStart(2, '0');
+const timestamp = date.getFullYear() + '/' + pad2(date.getMonth() + 1) + '/' + pad2(date.getDate()) + ' ' + pad2(date.getHours()) + ':' + pad2(date.getMinutes()) + ':' + pad2(date.getSeconds());
+html += '<div class="msg-head"><span class="sender">' + escapeHtml(msg.senderName) + '</span><span class="message-timestamp">(' + timestamp + ')</span>' + (isSelf? '<span class="del-btn" data-del="1">✕</span>': '') + '</div>';
 if (plainText) html += '<div class="text-content">' + escapeHtml(plainText) + '</div>';
 if (displaySec === 0 && msg.thumb) {
 html += '<img src="' + msg.thumb + '" class="chat-img-poster-thumb" style="cursor:default;" oncontextmenu="return false;">';
 html += '<div class="poster-only-note">粗サムネのみ表示</div>';
 } else if (msg.image) {
-html += '<img src="' + msg.image + '" class="chat-img" id="img-' + msg.id + '" oncontextmenu="return false;">';
+/* Ver.2.3.3: インラインは中サムネ (無ければ原画)。原画はタップ時の viewer だけが読む */
+html += '<span class="img-wrap"><img src="' + (msg.thumbMid || msg.image) + '" class="chat-img" id="img-' + msg.id + '" oncontextmenu="return false;">' + (originalDisplaySec > 0? '<span class="img-badge">⏱ ' + formatSecondsLabel(originalDisplaySec) + '表示</span>': '') + '</span>';
 } else if (msg.thumb) {
 html += '<img src="' + msg.thumb + '" class="chat-img-poster-thumb" style="cursor:default;" oncontextmenu="return false;">';
 html += '<div class="poster-only-note">粗サムネのみ表示</div>';
 }
 
-const date = new Date(postedAt);
-const pad2 = n => String(n).padStart(2, '0');
-const timestamp =
-date.getFullYear() + '/' +
-pad2(date.getMonth() + 1) + '/' +
-pad2(date.getDate()) + ' ' +
-pad2(date.getHours()) + ':' +
-pad2(date.getMinutes()) + ':' +
-pad2(date.getSeconds());
-html += '<div class="message-timestamp">(' + timestamp + ')</div>';
 
 div.innerHTML = html;
 container.appendChild(div);
+const delEl = div.querySelector('.del-btn'); if (delEl) delEl.addEventListener('click', function() { deleteMessage(msg.id);});
 scrollMessageFully(div);
 if (msg.image) {
 const imgEl = document.getElementById('img-' + msg.id);
@@ -1512,6 +1659,7 @@ openImageInNewTab(msg.id);
 }
 });
 if (displaySec!== 0) startImageExpireTimer(imgEl, msg.id, msg.thumb || null, displaySec, postedAt,!!isHistory);
+if (msg.forceExpired) expireImageNow(msg.id, true);
 }
 }
 }
@@ -1675,7 +1823,7 @@ logEvent('connect', { socket: shortId(socket.id), transport: (socket.conn && soc
 if (socket.conn) socket.conn.on('upgrade', (transport) => { logEvent('transport_upgrade', { socket: shortId(socket.id), transport: transport.name }); });
 socket.on('client_log', (data) => {
 try {
-const allowed = ['connect', 'disconnect', 'connect_error', 'reconnect_attempt', 'reconnect', 'visibility_hidden', 'visibility_visible', 'pagehide', 'pageshow', 'pull_refresh', 'image_open_new_tab'];
+const allowed = ['connect', 'disconnect', 'connect_error', 'reconnect_attempt', 'reconnect', 'visibility_hidden', 'visibility_visible', 'pagehide', 'pageshow', 'pull_refresh', 'image_open_new_tab', 'saved_room_pruned'];
 const ev = data && allowed.includes(data.event)? data.event: null;
 if (!ev) return;
 logEvent('client_' + ev, { socket: shortId(socket.id), room: (data && data.roomId) || socket.data.roomId || '-', sid: shortId(socket.data.sessionId), detail: String((data && data.detail) || '').substring(0, 100) });
@@ -1703,14 +1851,14 @@ socket.on('keep_alive', () => {});
 
 socket.on('get_room_info', ({ roomId}, callback) => {
 const room = rooms[roomId];
-if (!room) return safeCallback(callback, { waitingMsg: ''});
-safeCallback(callback, { waitingMsg: room.waitingMsg || ''});
+if (!room) return safeCallback(callback, { exists: false, waitingMsg: ''});
+safeCallback(callback, { exists: true, waitingMsg: room.waitingMsg || ''});
 });
 
 socket.on('rejoin_room', ({ roomId, sessionId, nickname}) => {
 ensurePublicRoom();
 const room = rooms[roomId];
-if (!room) { logEvent('rejoin_room_not_found', { room: roomId, sid: shortId(sessionId) }); return; }
+if (!room) { logEvent('rejoin_room_not_found', { room: roomId, sid: shortId(sessionId) }); socket.emit('room_not_found', { roomId: roomId }); return; }
 const beforeCount = getActiveMembers(room).length;
 const beforeNames = getMemberNames(room).join('|');
 cancelPendingOffline(roomId, sessionId);
@@ -1794,7 +1942,7 @@ try {
 ensurePublicRoom();
 const id = resolveRoomId(roomId, roomName);
 const room = id? rooms[id]: null;
-if (!room) return safeCallback(callback, { success: false, error: '部屋が存在しません。'});
+if (!room) return safeCallback(callback, { success: false, exists: false, error: '部屋が存在しません。'});
 
 const existingMember = room.members.find(m => m.sessionId === sessionId);
 const activeMembers = getActiveMembers(room);
@@ -1881,6 +2029,10 @@ if (msg.image) {
 const filePath = path.join(uploadDir, path.basename(msg.image));
 if (fs.existsSync(filePath)) fs.unlink(filePath, () => {});
 }
+if (msg.thumbMid) {
+const thumbPath = path.join(uploadDir, path.basename(msg.thumbMid));
+if (fs.existsSync(thumbPath)) fs.unlink(thumbPath, () => {});
+}
 });
 if (room.name && roomNameToId[room.name] === targetId) delete roomNameToId[room.name];
 io.to(targetId).emit('room_deleted_by_host');
@@ -1923,7 +2075,7 @@ safeCallback(callback, { success: true});
 
 socket.on('change_image_display_time', ({ roomId, seconds}) => {
 const room = rooms[roomId];
-if (!room || ![0, 1, 3, 5, 10, 3600].includes(seconds)) return;
+if (!room || ![0, 1, 2, 3, 5, 10, 3600].includes(seconds)) return;
 room.imageDisplaySeconds = seconds;
 room.lastActivityAt = Date.now();
 let label = seconds + '秒';
@@ -1945,7 +2097,7 @@ socket.on('typing_stop', ({ roomId}) => {
 socket.to(roomId || socket.data.roomId).emit('display_typing', { isTyping: false});
 });
 
-socket.on('send_message', ({ msgId, roomId, text, image, thumb, displaySeconds}) => {
+socket.on('send_message', ({ msgId, roomId, text, image, thumb, thumbMid, displaySeconds}) => {
 const targetId = roomId || socket.data.roomId;
 const room = rooms[targetId];
 if (!room) return;
@@ -1954,18 +2106,62 @@ let sender = room.members.find(m => m.sessionId === sessionId || m.id === socket
 if (sender) { cancelPendingOffline(targetId, sender.sessionId); sender.awaySince = null; sender.id = socket.id; socket.join(targetId); setSocketSession(targetId, sessionId);}
 room.lastActivityAt = Date.now();
 const ds = typeof displaySeconds === 'number'? displaySeconds: room.imageDisplaySeconds;
+const safeThumbMid = (typeof thumbMid === 'string' && /^\/uploads\/[A-Za-z0-9._-]+$/.test(thumbMid))? thumbMid: null;
 const messageData = {
 type: 'user', id: msgId || Math.random().toString(36).substring(2, 10), sessionId: sessionId,
 senderName: sender? sender.nickname: '匿名', colorIndex: sender? sender.colorIndex: 0,
-text, image: image || null, thumb: thumb || null, displaySeconds: ds, postedAt: Date.now()
+text, image: image || null, thumbMid: safeThumbMid, thumb: thumb || null, displaySeconds: ds, originalDisplaySeconds: ds, postedAt: Date.now()
 };
 if (image) scheduleImageDelete(image, ds);
+if (safeThumbMid) scheduleImageDelete(safeThumbMid, ds);
 room.messages.push(messageData);
 if (room.isPublic && room.messages.length > 100) {
 room.messages = room.messages.slice(-80);
 }
 trimPrivateHistory(room);
 io.to(targetId).emit('receive_message', messageData);
+});
+
+socket.on('restore_image', ({ roomId, msgId}) => {
+const targetId = roomId || socket.data.roomId;
+const room = rooms[targetId];
+if (!room) return;
+const member = room.members.find(m => m.sessionId === socket.data.sessionId || m.id === socket.id);
+if (!member) return;
+const targetMsg = room.messages.find(m => m.id === msgId);
+if (!targetMsg || !targetMsg.image) return;
+if (targetMsg.displaySeconds === 0) return;
+if (Date.now() - (targetMsg.postedAt || Date.now()) >= 3600 * 1000) return;
+/* Ver.2.3.5: 全員への反映を有効化できるのは投稿者だけ */
+if (targetMsg.sessionId !== socket.data.sessionId) { logEvent('image_restore_denied_not_sender', { room: targetId, sid: shortId(socket.data.sessionId), msg: msgId }); return; }
+if (targetMsg.displaySeconds === 3600 && !targetMsg.forceExpired) return;
+if (Date.now() - (targetMsg.lastToggleAt || 0) < 1000) { logEvent('image_toggle_rate_limited', { room: targetId, sid: shortId(socket.data.sessionId), msg: msgId }); return; }
+targetMsg.lastToggleAt = Date.now();
+targetMsg.displaySeconds = 3600;
+targetMsg.forceExpired = false;
+targetMsg.restoredAt = Date.now();
+logEvent('image_restored', { room: targetId, sid: shortId(socket.data.sessionId), msg: msgId });
+io.to(targetId).emit('image_restored', { msgId: msgId, displaySeconds: 3600, restoredAt: targetMsg.restoredAt });
+});
+
+socket.on('expire_image', ({ roomId, msgId}) => {
+const targetId = roomId || socket.data.roomId;
+const room = rooms[targetId];
+if (!room) return;
+const member = room.members.find(m => m.sessionId === socket.data.sessionId || m.id === socket.id);
+if (!member) return;
+const targetMsg = room.messages.find(m => m.id === msgId);
+if (!targetMsg || !targetMsg.image) return;
+if (targetMsg.displaySeconds === 0) return;
+/* Ver.2.3.5: 全員への即時粗サムネ化も投稿者だけ */
+if (targetMsg.sessionId !== socket.data.sessionId) { logEvent('image_expire_denied_not_sender', { room: targetId, sid: shortId(socket.data.sessionId), msg: msgId }); return; }
+if (targetMsg.forceExpired) return;
+if (Date.now() - (targetMsg.lastToggleAt || 0) < 1000) { logEvent('image_toggle_rate_limited', { room: targetId, sid: shortId(socket.data.sessionId), msg: msgId }); return; }
+targetMsg.lastToggleAt = Date.now();
+targetMsg.forceExpired = true;
+targetMsg.forceExpiredAt = Date.now();
+logEvent('image_expired_now', { room: targetId, sid: shortId(socket.data.sessionId), msg: msgId });
+io.to(targetId).emit('image_expired_now', { msgId: msgId, forceExpiredAt: targetMsg.forceExpiredAt });
 });
 
 socket.on('delete_message', ({ roomId, msgId}) => {
