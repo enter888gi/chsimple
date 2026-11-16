@@ -401,7 +401,7 @@ flex-shrink: 0;
 .pull-indicator { position: absolute; top: 6px; left: 0; right: 0; display: none; justify-content: center; z-index: 3; pointer-events: none;}
 #recent-strip { display: none; gap: 6px; padding: 6px 8px; background: var(--card-bg); border-bottom: 1px solid var(--border-color); overflow: hidden; align-items: center; flex-shrink: 0;}
 #recent-strip.show { display: flex;}
-.strip-item { flex: 1 1 0; aspect-ratio: 54 / 40; border-radius: 6px; overflow: hidden; cursor: pointer; transition: flex 0.25s ease, max-width 0.25s ease, opacity 0.25s ease, margin-right 0.25s ease;}
+.strip-item { flex: 0 0 calc((100% - 24px) / 5); aspect-ratio: 54 / 40; border-radius: 6px; overflow: hidden; cursor: pointer; transition: flex 0.25s ease, max-width 0.25s ease, opacity 0.25s ease, margin-right 0.25s ease;}
 .strip-item img { width: 100%; height: 100%; object-fit: cover; display: block;}
 .strip-item.leaving { flex: 0 0 0; max-width: 0; opacity: 0; margin-right: -6px;}
 .strip-item.enter { animation: stripIn 0.25s ease;}
@@ -422,7 +422,7 @@ flex-shrink: 0;
 .message .del-btn { margin-left: auto; cursor: pointer; color: #fca5a5; font-size: 0.75rem; opacity: 0.85; flex-shrink: 0; padding-left: 8px;}
 .system-notification { text-align: center; font-size: 0.75rem; color: var(--text-muted); margin: 4px 0; align-self: center;}
 .chat-img { max-width: 100%; max-height: 200px; border-radius: 8px; margin-top: 6px; cursor: pointer; user-select: none; -webkit-user-drag: none; display: block;}
-.chat-img-poster-thumb { width: 140px; height: auto; max-width: 100%; border-radius: 6px; margin-top: 6px; image-rendering: pixelated; border: 1px dashed #94a3b8; opacity: 0.85; display: block;}
+.chat-img-poster-thumb { width: 140px; height: auto; max-width: 100%; max-height: 200px; border-radius: 6px; margin-top: 6px; image-rendering: pixelated; border: 1px dashed #94a3b8; opacity: 0.85; display: block;}
 .expired-img-note { font-size: 0.72rem; color: #f87171; font-style: italic; margin-top: 4px;}
 .poster-only-note { font-size: 0.68rem; color: var(--text-muted); margin-top: 2px;}
 .message-timestamp { font-size: 0.62rem; color: var(--text-muted); line-height: 1.2; white-space: nowrap;}
@@ -495,7 +495,7 @@ flex-shrink: 0;
 <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
 <span class="room-name" id="header-room-name">SimpleChatee</span>
 <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.15</span>
+<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.18</span>
 </div>
 <div class="header-members" id="header-room-id-container" style="display:none;">
 <div class="member-block">
@@ -982,7 +982,6 @@ currentImageDisplaySeconds = data.seconds;
 const sel = document.getElementById('image-display-select');
 if (sel) sel.value = String(data.seconds);
 noteActivity();
-renderSystemNotification(data.text, data.id);
 });
 socket.on('display_typing', function(data) {
 document.getElementById('typing-indicator').innerText = data.isTyping? (data.nickname + ' が入力中...'): '';
@@ -1651,10 +1650,19 @@ if (thumbBase64) {
 const thumbImg = document.createElement('img');
 thumbImg.src = thumbBase64;
 thumbImg.className = 'chat-img-poster-thumb';
-thumbImg.dataset.role = 'expired-thumb';
 thumbImg.style.cursor = (meta && meta.image &&!meta.thumbOnly)? 'pointer': 'default';
 thumbImg.addEventListener('click', function(e) { handleExpiredThumbClick(e, msgId);});
-imgEl.parentNode.appendChild(thumbImg);
+const wrap = document.createElement('span');
+wrap.className = 'img-wrap';
+wrap.dataset.role = 'expired-thumb';
+wrap.appendChild(thumbImg);
+if (meta && meta.originalDisplaySeconds > 0) {
+const badge = document.createElement('span');
+badge.className = 'img-badge';
+badge.textContent = '⏱ ' + formatSecondsLabel(meta.originalDisplaySeconds) + '表示';
+wrap.appendChild(badge);
+}
+imgEl.parentNode.appendChild(wrap);
 const note = document.createElement('div');
 note.className = 'poster-only-note';
 note.dataset.role = 'expired-note';
@@ -1668,7 +1676,7 @@ return;
 const note = document.createElement('div');
 note.className = 'expired-img-note';
 note.dataset.role = 'expired-note';
-note.innerText = '🔒 画像の表示期限が切れました';
+note.innerText = '🔒 画像の表示期限が切れました' + ((meta && meta.originalDisplaySeconds > 0)? '（⏱ ' + formatSecondsLabel(meta.originalDisplaySeconds) + '表示で投稿）': '');
 note.addEventListener('click', function(e) { handleExpiredThumbClick(e, msgId);});
 imgEl.parentNode.appendChild(note);
 scheduleStripUpdate();
@@ -1925,14 +1933,14 @@ const img = document.getElementById('image-modal-img');
 const note = document.getElementById('image-modal-note');
 if (imageModalTimer) { clearTimeout(imageModalTimer); imageModalTimer = null;}
 imageModalOpenedAt = Date.now();
-note.textContent = '';
+note.textContent = (meta.originalDisplaySeconds > 0)? '⏱ ' + formatSecondsLabel(meta.originalDisplaySeconds) + '表示で投稿': '';
 img.src = meta.image;
 img.style.imageRendering = 'auto';
 if (meta.thumb && meta.displaySeconds < 3600) {
 imageModalTimer = setTimeout(function() {
 img.src = meta.thumb;
 img.style.imageRendering = 'pixelated';
-note.textContent = '時間経過につき粗サムネのみ表示';
+note.textContent = '時間経過につき粗サムネのみ表示' + ((meta.originalDisplaySeconds > 0)? '（⏱ ' + formatSecondsLabel(meta.originalDisplaySeconds) + '表示で投稿）': '');
 }, Math.max(1000, meta.displaySeconds * 1000));
 }
 modal.classList.add('active');
@@ -1944,7 +1952,7 @@ if (meta.expired) return;
 const elapsed = Date.now() - (meta.postedAt || Date.now());
 if (meta.displaySeconds < 3600 && elapsed > meta.displaySeconds * 1000 + 120000) return;
 clientLog('image_open_new_tab', '');
-const viewerUrl = '/viewer#i=' + encodeURIComponent(meta.image) + '&s=' + encodeURIComponent(String(meta.displaySeconds)) + '&t=' + encodeURIComponent(String(meta.postedAt || Date.now()));
+const viewerUrl = '/viewer#i=' + encodeURIComponent(meta.image) + '&s=' + encodeURIComponent(String(meta.displaySeconds)) + '&t=' + encodeURIComponent(String(meta.postedAt || Date.now())) + '&o=' + encodeURIComponent(String(meta.originalDisplaySeconds || 0));
 const win = window.open(viewerUrl, '_blank');
 if (!win) { openImageModal(msgId); showSoftToast('別タブを開けなかったため、このタブで表示しました'); }
 }
@@ -1992,6 +2000,7 @@ img { max-width: 100vw; max-height: calc(100vh - 90px); object-fit: contain; use
 #expired-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.94); display: none; align-items: center; justify-content: center; z-index: 10; padding: 20px; }
 .expired-box { text-align: center; }
 #expired-msg { font-size: 1rem; line-height: 1.6; margin-bottom: 18px; }
+#expired-orig { color: #94a3b8; font-size: 0.85rem; margin-bottom: 18px; }
 #expired-close-btn { padding: 12px 26px; border: none; border-radius: 8px; background: #38bdf8; color: #0f172a; font-weight: bold; font-size: 0.95rem; cursor: pointer; }
 </style>
 </head>
@@ -1999,7 +2008,7 @@ img { max-width: 100vw; max-height: calc(100vh - 90px); object-fit: contain; use
 <img id="viewer-img" alt="画像" oncontextmenu="return false;">
 <div id="note">表示時間が過ぎると自動で消えます。このタブを閉じるとチャットに戻ります。</div>
 <button type="button" id="close-btn" onclick="window.close()">タブを閉じる</button>
-<div id="expired-overlay"><div class="expired-box"><div id="expired-msg">表示時間が過ぎたため、画像は表示できません。</div><button type="button" id="expired-close-btn" onclick="window.close()">タブを閉じる</button></div></div>
+<div id="expired-overlay"><div class="expired-box"><div id="expired-msg">表示時間が過ぎたため、画像は表示できません。</div><div id="expired-orig"></div><button type="button" id="expired-close-btn" onclick="window.close()">タブを閉じる</button></div></div>
 <script>
 (function() {
 function parseHash() {
@@ -2017,6 +2026,12 @@ var note = document.getElementById('note');
 var src = p.i || '';
 if (!src || src.indexOf('/uploads/') !== 0) { note.textContent = '画像の指定が正しくありません。'; img.style.display = 'none'; return; }
 img.src = src;
+var origSec = parseInt(p.o || '0', 10);
+if (origSec > 0) {
+var origLabel = (origSec === 3600)? '1時間': (origSec + '秒');
+note.textContent = '⏱ ' + origLabel + '表示で投稿された画像です。表示時間が過ぎると自動で消えます。このタブを閉じるとチャットに戻ります。';
+document.getElementById('expired-orig').textContent = '⏱ ' + origLabel + '表示で投稿されました';
+}
 document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
 var seconds = parseInt(p.s || '5', 10);
 var postedAt = parseInt(p.t || '0', 10) || Date.now();
@@ -2330,12 +2345,8 @@ const room = rooms[roomId];
 if (!room || ![0, 1, 2, 3, 5, 10, 3600].includes(seconds)) return;
 room.imageDisplaySeconds = seconds;
 room.lastActivityAt = Date.now();
-let label = seconds + '秒';
-if (seconds === 0) label = '粗サムネのみ';
-else if (seconds === 3600) label = '1時間';
-const systemMsg = { type: 'system', id: 'system-' + Math.random().toString(36).substring(2, 10), text: '画像表示時間が' + label + 'に切り替わりました'};
-room.messages.push(systemMsg);
-io.to(roomId).emit('image_display_changed', { seconds: seconds, text: systemMsg.text, id: systemMsg.id});
+/* Ver.2.3.16: 切り替わりました通知は出さない (設定の同期だけ静かに行う) */
+io.to(roomId).emit('image_display_changed', { seconds: seconds });
 });
 
 socket.on('typing_start', ({ roomId}) => {
