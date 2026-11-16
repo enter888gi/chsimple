@@ -7,7 +7,58 @@ const fs = require('fs');
 
 const app = Express();
 const server = http.createServer(app);
-const io = new Server(server, { maxHttpBufferSize: 35e6});
+const io = new Server(server, { maxHttpBufferSize: 35e6, pingInterval: 25000, pingTimeout: 60000, connectionStateRecovery: { maxDisconnectionDuration: 2 * 60 * 1000, skipMiddlewares: true }});
+/* Ver.2.3.0 変更点:
+   1) 切断ログ/クライアントログを追加し、切断理由を記録する
+   2) 切断後90秒は退室扱いにしない復帰猶予 (人数の増減フラッピング防止)
+   3) join_room の入室通知は新規入室と明示退室後の復帰だけに限定
+   4) 再同期は直近100件だけ・プライベート履歴は300件でローテーション
+   5) クライアント再接続は無制限リトライ＋自動の静かな復帰入室
+   6) プルリフレッシュの発動距離を 36px -> 80px に引き上げ
+   7) 画像タップは同タブのモーダルではなく別タブの専用viewerで開く */
+const DISCONNECT_GRACE_MS = 90 * 1000;
+const SYNC_MESSAGE_LIMIT = 100;
+const PRIVATE_HISTORY_LIMIT = 300;
+const disconnectTimers = {};
+function shortId(v) { return v ? String(v).slice(0, 6) : '-'; }
+function logEvent(event, fields) {
+try { console.log(JSON.stringify(Object.assign({ t: new Date().toISOString(), event: event }, fields || {}))); } catch (e) { console.log('[log]', event); }
+}
+function memberTimerKey(roomId, sessionId) { return roomId + ':' + sessionId; }
+function cancelPendingOffline(roomId, sessionId) {
+if (!roomId || !sessionId) return;
+const k = memberTimerKey(roomId, sessionId);
+if (disconnectTimers[k]) { clearTimeout(disconnectTimers[k]); delete disconnectTimers[k]; }
+}
+function emitMemberCountGlobal(roomId) {
+const room = rooms[roomId];
+if (!room) return;
+const active = getActiveMembers(room);
+io.to(roomId).emit('update_members', { count: active.length, maxMembers: room.maxMembers, members: active.map(m => m.nickname) });
+}
+function scheduleMemberOffline(roomId, sessionId, socketId) {
+cancelPendingOffline(roomId, sessionId);
+const k = memberTimerKey(roomId, sessionId);
+disconnectTimers[k] = setTimeout(() => {
+delete disconnectTimers[k];
+const room = rooms[roomId];
+if (!room) return;
+const member = room.members.find(m => m.sessionId === sessionId);
+if (!member || member.id !== socketId || !member.awaySince) return;
+member.id = null;
+member.awaySince = null;
+logEvent('member_offline_grace_expired', { room: roomId, sid: shortId(sessionId), count: getActiveMembers(room).length });
+emitMemberCountGlobal(roomId);
+}, DISCONNECT_GRACE_MS);
+}
+function trimPrivateHistory(room) {
+if (room && !room.isPublic && room.messages && room.messages.length > PRIVATE_HISTORY_LIMIT) {
+room.messages = room.messages.slice(-240);
+}
+}
+function recentMessages(room) {
+return (room.messages || []).slice(-SYNC_MESSAGE_LIMIT);
+}
 
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
@@ -24,7 +75,7 @@ cb(null, uniqueName);
 });
 const upload = multer({ storage, limits: { fileSize: 30 * 1024 * 1024}});
 
-app.use('/uploads', Express.static(uploadDir));
+app.use('/uploads', Express.static(uploadDir, { setHeaders: (res) => { res.setHeader('Cache-Control', 'no-store'); } }));
 
 app.get('/api/ping', (req, res) => {
 res.json({ ok: true, t: Date.now()});
@@ -376,7 +427,7 @@ flex-shrink: 0;
 <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
 <span class="room-name" id="header-room-name">SimpleChatee</span>
 <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-<span class="version-tag">Ver. 2.2.0</span>
+<span class="version-tag">Ver. 2.3.0</span>
 </div>
 <div class="header-members" id="header-room-id-container" style="display:none;">
 <div class="member-block">
@@ -481,7 +532,19 @@ flex-shrink: 0;
 </div>
 <script src="/socket.io/socket.io.js"></script>
 <script>
-const socket = io({ reconnection: true, reconnectionAttempts: 10});
+const socket = io({ reconnection: true, reconnectionAttempts: Infinity, reconnectionDelay: 1000, reconnectionDelayMax: 10000, timeout: 20000});
+let autoJoinPending = false;
+let clientLogQueue = [];
+function clientLog(eventName, detail) {
+try {
+const item = { event: eventName, detail: detail || '', roomId: currentRoomId || '' };
+if (socket && socket.connected) socket.emit('client_log', item);
+else if (clientLogQueue.length < 20) clientLogQueue.push(item);
+} catch (e) {}
+}
+function flushClientLogs() {
+try { while (clientLogQueue.length) { const item = clientLogQueue.shift(); socket.emit('client_log', item); } } catch (e) {}
+}
 let currentRoomId = '';
 let currentRoomName = '';
 let currentKey = '';
@@ -575,7 +638,7 @@ pulling = scroller.scrollTop <= 2;
 }, { passive: true});
 scroller.addEventListener('touchmove', function(e) {
 if (!pulling) return;
-if (e.touches[0].clientY - startY > 36) indicator.classList.add('show');
+if (e.touches[0].clientY - startY > 80) indicator.classList.add('show');
 }, { passive: true});
 scroller.addEventListener('touchend', function() {
 if (indicator.classList.contains('show') && pulling) refreshRoom();
@@ -585,6 +648,7 @@ pulling = false;
 }
 function refreshRoom() {
 if (!currentRoomId ||!userSessionId) return;
+clientLog('pull_refresh', '');
 refreshing = true;
 document.getElementById('pull-indicator').classList.add('show');
 socket.emit('rejoin_room', { roomId: currentRoomId, sessionId: userSessionId, nickname: myNickname});
@@ -736,15 +800,34 @@ isPublicRoom = false;
 });
 }
 socket.on('connect', function() {
+flushClientLogs();
+clientLog('connect', '');
+if (autoJoinPending && currentRoomId && currentKey && myNickname) {
+autoJoinPending = false;
+joinRoom();
+return;
+}
 if (currentRoomId && userSessionId) {
 if (isRoomBanned(currentRoomId)) {
 goHome(true);
 return;
 }
 socket.emit('rejoin_room', { roomId: currentRoomId, sessionId: userSessionId, nickname: myNickname});
+if (isHost) startKeepAlive();
 }
 });
-socket.on('disconnect', function() { stopKeepAlive();});
+socket.on('disconnect', function(reason) { clientLog('disconnect', String(reason || '')); stopKeepAlive();});
+socket.on('connect_error', function() { clientLog('connect_error', ''); });
+try {
+socket.io.on('reconnect_attempt', function(n) { clientLog('reconnect_attempt', 'n=' + n); });
+socket.io.on('reconnect', function(n) { clientLog('reconnect', 'n=' + n); });
+} catch (e) {}
+document.addEventListener('visibilitychange', function() {
+if (document.hidden) clientLog('visibility_hidden', '');
+else { clientLog('visibility_visible', ''); if (!socket.connected) { try { socket.connect(); } catch (e) {} } }
+});
+window.addEventListener('pagehide', function() { clientLog('pagehide', ''); });
+window.addEventListener('pageshow', function() { clientLog('pageshow', ''); });
 socket.on('room_state_sync', function(data) {
 if (!data || data.roomId!== currentRoomId) return;
 updateMemberCount(data.count, data.maxMembers, data.members);
@@ -983,6 +1066,12 @@ if (keyFromHash) currentKey = keyFromHash;
 document.getElementById('join-target-room-title').innerText = '部屋に入室';
 document.getElementById('join-key-warning').style.display = currentKey? 'none': 'block';
 showView('view-join');
+/* Ver.2.3.0: 保存済み(鍵+ニックネームあり)ならタップなしで静かに自動入室する。復帰時は入室通知を出さない */
+if (currentKey && myNickname) {
+document.getElementById('join-nickname').value = myNickname;
+if (socket.connected) joinRoom();
+else autoJoinPending = true;
+}
 }
 };
 
@@ -1412,14 +1501,14 @@ scrollMessageFully(div);
 if (msg.image) {
 const imgEl = document.getElementById('img-' + msg.id);
 if (imgEl) {
-/* Ver.2.2.0: 通常クリック=プレビュー / Ctrl+Shift+クリック=即座に粗サムネ化 */
+/* Ver.2.3.0: 通常クリック=別タブの専用viewerで開く(同タブのモーダルはポップアップが塞がれた時だけの予備) / Ctrl+Shift+クリック=即座に粗サムネ化 */
 imgEl.addEventListener('click', function(e) {
 if (e.ctrlKey && e.shiftKey) {
 e.preventDefault();
 e.stopPropagation();
 expireImageNow(msg.id);
 } else {
-openImageModal(msg.id);
+openImageInNewTab(msg.id);
 }
 });
 if (displaySec!== 0) startImageExpireTimer(imgEl, msg.id, msg.thumb || null, displaySec, postedAt,!!isHistory);
@@ -1468,6 +1557,17 @@ note.textContent = '時間経過につき粗サムネのみ表示';
 }
 modal.classList.add('active');
 }
+function openImageInNewTab(msgId) {
+const meta = messageMeta[msgId];
+if (!meta || meta.thumbOnly || meta.displaySeconds === 0 ||!meta.image) return;
+if (meta.expired) return;
+const elapsed = Date.now() - (meta.postedAt || Date.now());
+if (meta.displaySeconds < 3600 && elapsed > meta.displaySeconds * 1000 + 120000) return;
+clientLog('image_open_new_tab', '');
+const viewerUrl = '/viewer#i=' + encodeURIComponent(meta.image) + '&s=' + encodeURIComponent(String(meta.displaySeconds)) + '&t=' + encodeURIComponent(String(meta.postedAt || Date.now()));
+const win = window.open(viewerUrl, '_blank');
+if (!win) { openImageModal(msgId); showSoftToast('別タブを開けなかったため、このタブで表示しました'); }
+}
 function closeImageModal(event, force) {
 if (event) {
 if (!force && event.target && event.target.id === 'image-modal-img') return;
@@ -1496,9 +1596,67 @@ return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[m]
 </body>
 </html>`;
 
+const VIEWER_HTML = `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>画像を表示中 - SimpleChatee</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+body { background: #000; color: #f8fafc; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: calc(12px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom)); }
+img { max-width: 100vw; max-height: calc(100vh - 90px); object-fit: contain; user-select: none; -webkit-user-drag: none; -webkit-touch-callout: none; }
+#note { color: #94a3b8; font-size: 0.8rem; margin-top: 10px; text-align: center; line-height: 1.5; }
+#close-btn { margin-top: 14px; padding: 10px 22px; border: none; border-radius: 8px; background: #38bdf8; color: #0f172a; font-weight: bold; font-size: 0.9rem; cursor: pointer; }
+</style>
+</head>
+<body>
+<img id="viewer-img" alt="画像" oncontextmenu="return false;">
+<div id="note">表示時間が過ぎると自動で消えます。このタブを閉じるとチャットに戻ります。</div>
+<button type="button" id="close-btn" onclick="window.close()">タブを閉じる</button>
+<script>
+(function() {
+function parseHash() {
+var out = {};
+var h = (window.location.hash || '').replace(/^#/, '');
+h.split('&').forEach(function(pair) {
+var idx = pair.indexOf('=');
+if (idx > 0) out[pair.substring(0, idx)] = decodeURIComponent(pair.substring(idx + 1));
+});
+return out;
+}
+var p = parseHash();
+var img = document.getElementById('viewer-img');
+var note = document.getElementById('note');
+var src = p.i || '';
+if (!src || src.indexOf('/uploads/') !== 0) { note.textContent = '画像の指定が正しくありません。'; img.style.display = 'none'; return; }
+img.src = src;
+document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+var seconds = parseInt(p.s || '5', 10);
+var postedAt = parseInt(p.t || '0', 10) || Date.now();
+if (!isNaN(seconds) && seconds > 0 && seconds < 3600) {
+var remaining = seconds * 1000 - (Date.now() - postedAt);
+var expire = function() {
+img.remove();
+note.textContent = '表示時間が過ぎたため、画像は表示できません。このタブを閉じてください。';
+};
+if (remaining <= 0) expire();
+else setTimeout(expire, remaining);
+}
+})();
+</script>
+</body>
+</html>`;
+
 app.get('/', (req, res) => {
 res.send(HTML_CONTENT);
 });
+app.get('/viewer', (req, res) => {
+res.set('Cache-Control', 'no-store');
+res.send(VIEWER_HTML);
+});
+
 
 /* Ver.2.2.0: 短縮リンク '/部屋ID' 形式でもページを返す（/api・/uploads・socket.io には当たらない6桁固定） */
 app.get('/:roomId([a-z0-9]{6})', (req, res) => {
@@ -1512,23 +1670,33 @@ try { callback(payload);} catch (e) { console.error(e);}
 }
 
 io.on('connection', (socket) => {
+const connectedAt = Date.now();
+logEvent('connect', { socket: shortId(socket.id), transport: (socket.conn && socket.conn.transport)? socket.conn.transport.name: '-', recovered: !!socket.recovered });
+if (socket.conn) socket.conn.on('upgrade', (transport) => { logEvent('transport_upgrade', { socket: shortId(socket.id), transport: transport.name }); });
+socket.on('client_log', (data) => {
+try {
+const allowed = ['connect', 'disconnect', 'connect_error', 'reconnect_attempt', 'reconnect', 'visibility_hidden', 'visibility_visible', 'pagehide', 'pageshow', 'pull_refresh', 'image_open_new_tab'];
+const ev = data && allowed.includes(data.event)? data.event: null;
+if (!ev) return;
+logEvent('client_' + ev, { socket: shortId(socket.id), room: (data && data.roomId) || socket.data.roomId || '-', sid: shortId(socket.data.sessionId), detail: String((data && data.detail) || '').substring(0, 100) });
+} catch (e) {}
+});
 function setSocketSession(roomId, sessionId) {
 socket.data.roomId = roomId;
 socket.data.sessionId = sessionId;
 }
-function emitMemberCount(roomId) {
-const room = rooms[roomId];
-if (!room) return;
-const active = getActiveMembers(room);
-io.to(roomId).emit('update_members', { count: active.length, maxMembers: room.maxMembers, members: active.map(m => m.nickname)});
-}
+function emitMemberCount(roomId) { emitMemberCountGlobal(roomId); }
 function syncRoomToSocket(targetSocket, roomId) {
 const room = rooms[roomId];
 if (!room) return;
 const active = getActiveMembers(room);
+const syncMessages = recentMessages(room);
+let syncBytes = 0;
+try { syncBytes = JSON.stringify(syncMessages).length; } catch (e) {}
+logEvent('room_state_sync', { room: roomId, sid: shortId(targetSocket.data.sessionId), messages: syncMessages.length, totalMessages: room.messages.length, bytes: syncBytes });
 targetSocket.emit('room_state_sync', {
 roomId: roomId, roomName: room.name, count: active.length, maxMembers: room.maxMembers,
-members: active.map(m => m.nickname), imageDisplaySeconds: room.imageDisplaySeconds, messages: room.messages
+members: active.map(m => m.nickname), imageDisplaySeconds: room.imageDisplaySeconds, messages: syncMessages
 });
 }
 socket.on('keep_alive', () => {});
@@ -1542,27 +1710,36 @@ safeCallback(callback, { waitingMsg: room.waitingMsg || ''});
 socket.on('rejoin_room', ({ roomId, sessionId, nickname}) => {
 ensurePublicRoom();
 const room = rooms[roomId];
-if (!room) return;
+if (!room) { logEvent('rejoin_room_not_found', { room: roomId, sid: shortId(sessionId) }); return; }
+const beforeCount = getActiveMembers(room).length;
+const beforeNames = getMemberNames(room).join('|');
+cancelPendingOffline(roomId, sessionId);
 socket.join(roomId);
 setSocketSession(roomId, sessionId);
 let member = room.members.find(m => m.sessionId === sessionId);
+const wasAway = !!(member && member.awaySince);
 if (member) {
 member.id = socket.id;
+member.awaySince = null;
+member.explicitlyLeft = false;
 if (nickname) member.nickname = nickname;
+logEvent('rejoin_room', { room: roomId, sid: shortId(sessionId), kind: wasAway? 'return_from_away': 'existing', count: getActiveMembers(room).length });
 } else {
 const active = getActiveMembers(room);
 const isRegisteredMember = room.joinedSessionIds && room.joinedSessionIds.includes(sessionId);
 if (active.length < room.maxMembers || isRegisteredMember) {
 if (!room.joinedSessionIds.includes(sessionId)) room.joinedSessionIds.push(sessionId);
-room.members.push({ id: socket.id, sessionId, nickname: nickname || 'ゲスト', colorIndex: room.members.length % 4});
+room.members.push({ id: socket.id, sessionId, nickname: nickname || 'ゲスト', colorIndex: room.members.length % 4, awaySince: null, explicitlyLeft: false});
+logEvent('rejoin_room', { room: roomId, sid: shortId(sessionId), kind: 'new_member', count: getActiveMembers(room).length });
 } else {
+logEvent('rejoin_room_full', { room: roomId, sid: shortId(sessionId), count: active.length });
 socket.emit('room_full_rejected');
 return;
 }
 }
 room.lastActivityAt = Date.now();
 syncRoomToSocket(socket, roomId);
-emitMemberCount(roomId);
+if (beforeCount !== getActiveMembers(room).length || beforeNames !== getMemberNames(room).join('|')) emitMemberCount(roomId);
 });
 
 socket.on('create_room', (data, callback) => {
@@ -1599,6 +1776,7 @@ messages: [initialSystemMsg],
 lastActivityAt: Date.now()
 };
 roomNameToId[roomName] = roomId;
+logEvent('create_room', { room: roomId, sid: shortId(sessionId) });
 socket.join(roomId);
 setSocketSession(roomId, sessionId);
 safeCallback(callback, {
@@ -1628,30 +1806,42 @@ socket.emit('room_full_rejected');
 return safeCallback(callback, { success: false, full: true, error: '現在満員です'});
 }
 
+const wasExplicitlyLeft = !!(existingMember && existingMember.explicitlyLeft);
+const isReturning = !!existingMember || !!isRegistered;
+cancelPendingOffline(id, sessionId);
 if (!room.joinedSessionIds.includes(sessionId)) {
 room.joinedSessionIds.push(sessionId);
 }
 
 if (!existingMember) {
-room.members.push({ id: socket.id, sessionId, nickname: nickname || 'ゲスト', colorIndex: room.members.length % 4});
+room.members.push({ id: socket.id, sessionId, nickname: nickname || 'ゲスト', colorIndex: room.members.length % 4, awaySince: null, explicitlyLeft: false});
 } else {
 existingMember.id = socket.id;
+existingMember.awaySince = null;
+existingMember.explicitlyLeft = false;
 existingMember.nickname = nickname || existingMember.nickname;
 }
 room.lastActivityAt = Date.now();
 socket.join(id);
 setSocketSession(id, sessionId);
-const systemMsg = { type: 'system', id: 'system-' + Math.random().toString(36).substring(2, 10), text: (nickname || 'ゲスト') + ' が入室しました'};
+logEvent('join_room', { room: id, sid: shortId(sessionId), kind: isReturning? (wasExplicitlyLeft? 'return_after_leave': 'returning'): 'new', count: getActiveMembers(room).length });
+/* Ver.2.3.0: 入室通知は新規入室と明示退室後の復帰だけ。単なる再接続/再読み込みの復帰では出さない */
+const shouldAnnounce = !isReturning || wasExplicitlyLeft;
+let systemMsg = null;
+if (shouldAnnounce) {
+systemMsg = { type: 'system', id: 'system-' + Math.random().toString(36).substring(2, 10), text: (nickname || 'ゲスト') + ' が入室しました'};
 room.messages.push(systemMsg);
 if (room.isPublic && room.messages.length > 100) {
 room.messages = room.messages.slice(-80);
 }
+trimPrivateHistory(room);
+}
 safeCallback(callback, {
-success: true, roomId: id, roomName: room.name, messages: room.messages, isHost: room.hostSessionId === sessionId,
+success: true, roomId: id, roomName: room.name, messages: recentMessages(room), isHost: room.hostSessionId === sessionId,
 maxMembers: room.maxMembers, imageDisplaySeconds: room.imageDisplaySeconds,
 memberCount: getActiveMembers(room).length, members: getMemberNames(room)
 });
-setTimeout(() => { if (rooms[id]) { io.to(id).emit('receive_message', systemMsg); emitMemberCount(id);}}, 0);
+setTimeout(() => { if (rooms[id]) { if (systemMsg) io.to(id).emit('receive_message', systemMsg); emitMemberCount(id);}}, 0);
 } catch (err) {
 safeCallback(callback, { success: false, error: '入室中にエラーが発生しました'});
 }
@@ -1664,7 +1854,11 @@ if (!room) return;
 const sid = sessionId || socket.data.sessionId;
 const member = room.members.find(m => m.sessionId === sid || m.id === socket.id);
 if (!member) return;
+cancelPendingOffline(targetId, member.sessionId);
 member.id = null;
+member.awaySince = null;
+member.explicitlyLeft = true;
+logEvent('leave_room', { room: targetId, sid: shortId(member.sessionId) });
 room.lastActivityAt = Date.now();
 const systemMsg = { type: 'system', id: 'system-' + Math.random().toString(36).substring(2, 10), text: member.nickname + ' が退室しました'};
 room.messages.push(systemMsg);
@@ -1680,6 +1874,8 @@ if (targetId === PUBLIC_ROOM_ID) return safeCallback(callback, { success: false,
 const room = rooms[targetId];
 if (!room) return safeCallback(callback, { success: false, error: '部屋が存在しません'});
 if (room.hostSessionId!== socket.data.sessionId) return safeCallback(callback, { success: false, error: '権限がありません'});
+(room.members || []).forEach(m => cancelPendingOffline(targetId, m.sessionId));
+logEvent('delete_room', { room: targetId, sid: shortId(socket.data.sessionId) });
 room.messages.forEach(msg => {
 if (msg.image) {
 const filePath = path.join(uploadDir, path.basename(msg.image));
@@ -1708,6 +1904,10 @@ if (targetSessionId === room.hostSessionId) return safeCallback(callback, { succ
 const target = room.members.find(m => m.sessionId === targetSessionId);
 if (!target) return safeCallback(callback, { success: false, error: '対象のメンバーが見つかりません'});
 
+cancelPendingOffline(roomId, targetSessionId);
+room.joinedSessionIds = (room.joinedSessionIds || []).filter(s => s !== targetSessionId);
+target.awaySince = null;
+logEvent('force_kick', { room: roomId, sid: shortId(socket.data.sessionId), target: shortId(targetSessionId) });
 if (target.id) {
 const targetSocket = io.sockets.sockets.get(target.id);
 if (targetSocket) {
@@ -1751,7 +1951,7 @@ const room = rooms[targetId];
 if (!room) return;
 const sessionId = socket.data.sessionId;
 let sender = room.members.find(m => m.sessionId === sessionId || m.id === socket.id);
-if (sender) { sender.id = socket.id; socket.join(targetId); setSocketSession(targetId, sessionId);}
+if (sender) { cancelPendingOffline(targetId, sender.sessionId); sender.awaySince = null; sender.id = socket.id; socket.join(targetId); setSocketSession(targetId, sessionId);}
 room.lastActivityAt = Date.now();
 const ds = typeof displaySeconds === 'number'? displaySeconds: room.imageDisplaySeconds;
 const messageData = {
@@ -1764,6 +1964,7 @@ room.messages.push(messageData);
 if (room.isPublic && room.messages.length > 100) {
 room.messages = room.messages.slice(-80);
 }
+trimPrivateHistory(room);
 io.to(targetId).emit('receive_message', messageData);
 });
 
@@ -1778,12 +1979,18 @@ io.to(targetId).emit('message_deleted', { msgId});
 }
 });
 
-socket.on('disconnect', () => {
+socket.on('disconnect', (reason) => {
 const roomId = socket.data.roomId;
-if (roomId && rooms[roomId]) {
-const member = rooms[roomId].members.find(m => m.id === socket.id);
-if (member) { member.id = null; emitMemberCount(roomId);}
-}
+const sessionId = socket.data.sessionId;
+logEvent('disconnect', { socket: shortId(socket.id), room: roomId || '-', sid: shortId(sessionId), reason: reason, durationMs: Date.now() - connectedAt, recovered: !!socket.recovered });
+if (!roomId || !rooms[roomId]) return;
+const room = rooms[roomId];
+const member = room.members.find(m => m.id === socket.id);
+if (!member) { logEvent('disconnect_stale_socket', { room: roomId, sid: shortId(sessionId) }); return; }
+/* Ver.2.3.0: 即退室にせず90秒の復帰猶予に入る。この間は人数も名前も変わらない */
+member.awaySince = Date.now();
+scheduleMemberOffline(roomId, member.sessionId, socket.id);
+logEvent('member_away_grace_started', { room: roomId, sid: shortId(member.sessionId), reason: reason, graceSec: DISCONNECT_GRACE_MS / 1000, count: getActiveMembers(room).length });
 });
 });
 
