@@ -399,6 +399,14 @@ flex-shrink: 0;
 }
 #chat-messages { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 8px; padding: 36px 10px 48px;}
 .pull-indicator { position: absolute; top: 6px; left: 0; right: 0; display: none; justify-content: center; z-index: 3; pointer-events: none;}
+#recent-strip { display: none; gap: 6px; padding: 6px 8px; background: var(--card-bg); border-bottom: 1px solid var(--border-color); overflow: hidden; align-items: center; flex-shrink: 0;}
+#recent-strip.show { display: flex;}
+.strip-item { flex: 1 1 0; max-width: 54px; aspect-ratio: 54 / 40; border-radius: 6px; overflow: hidden; cursor: pointer; transition: flex 0.25s ease, max-width 0.25s ease, opacity 0.25s ease, margin-right 0.25s ease;}
+.strip-item img { width: 100%; height: 100%; object-fit: cover; display: block;}
+.strip-item.leaving { flex: 0 0 0; max-width: 0; opacity: 0; margin-right: -6px;}
+.strip-item.enter { animation: stripIn 0.25s ease;}
+@keyframes stripIn { from { transform: translateX(14px); opacity: 0;} to { transform: none; opacity: 1;}}
+.strip-lock { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: #1e293b; font-size: 1rem;}
 .pull-indicator.show { display: flex;}
 .spinner { width: 18px; height: 18px; border: 2px solid #334155; border-top-color: var(--accent-color); border-radius: 50%; animation: spin 0.7s linear infinite;}
 @keyframes spin { to { transform: rotate(360deg);}}
@@ -487,7 +495,7 @@ flex-shrink: 0;
 <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
 <span class="room-name" id="header-room-name">SimpleChatee</span>
 <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.9</span>
+<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.12</span>
 </div>
 <div class="header-members" id="header-room-id-container" style="display:none;">
 <div class="member-block">
@@ -571,6 +579,7 @@ flex-shrink: 0;
 <button type="button" class="btn-secondary" style="margin-top: 10px;" onclick="goHome()">トップに戻る</button>
 </div>
 <div id="view-chat" class="view">
+<div id="recent-strip"></div>
 <div id="pull-indicator" class="pull-indicator"><span class="spinner"></span></div>
 <div id="chat-messages"></div>
 <div class="input-area">
@@ -952,6 +961,9 @@ socket.on('image_restored', function(data) {
 if (!data || !data.msgId) return;
 restoreImage(data.msgId, true);
 });
+socket.on('image_toggle_rate_limited', function(data) {
+showSoftToast('切り替えが速すぎます。少し待ってください');
+});
 socket.on('image_expired_now', function(data) {
 if (!data || !data.msgId) return;
 expireImageNow(data.msgId, true);
@@ -1089,7 +1101,7 @@ const img = new Image();
 img.onerror = () => resolve(null);
 img.onload = () => {
 try {
-const maxDim = 720;
+const maxDim = 560;
 const longest = Math.max(img.width, img.height);
 const scale = longest > maxDim ? maxDim / longest : 1;
 const canvas = document.createElement('canvas');
@@ -1102,7 +1114,7 @@ canvas.toBlob((blob) => {
 if (!blob) return resolve(null);
 if (blob.size >= file.size * 0.9) return resolve(null);
 resolve(blob);
-}, 'image/jpeg', 0.72);
+}, 'image/jpeg', 0.70);
 } catch (err) { resolve(null); }
 };
 img.src = e.target.result;
@@ -1437,6 +1449,9 @@ document.getElementById('btn-kick').style.display = (isHost &&!isPublicRoom && r
 if (Array.isArray(members)) updateMemberCount(members.length, currentMaxMembers, members);
 if (!isPublicRoom && roomId!== PUBLIC_ROOM_ID) {
 window.history.pushState({}, '', buildRoomUrl(currentRoomId, currentKey));
+const cm = document.getElementById('chat-messages');
+if (cm && !cm.dataset.stripBound) { cm.dataset.stripBound = '1'; cm.addEventListener('scroll', scheduleStripUpdate, { passive: true }); window.addEventListener('resize', scheduleStripUpdate); }
+scheduleStripUpdate();
 }
 showView('view-chat');
 const container = document.getElementById('chat-messages');
@@ -1634,6 +1649,7 @@ note.innerText = '時間経過につき粗サムネのみ表示';
 note.addEventListener('click', function(e) { handleExpiredThumbClick(e, msgId);});
 imgEl.parentNode.appendChild(note);
 scrollMessageFully(imgEl.parentNode);
+scheduleStripUpdate();
 return;
 }
 const note = document.createElement('div');
@@ -1642,6 +1658,7 @@ note.dataset.role = 'expired-note';
 note.innerText = '🔒 画像の表示期限が切れました';
 note.addEventListener('click', function(e) { handleExpiredThumbClick(e, msgId);});
 imgEl.parentNode.appendChild(note);
+scheduleStripUpdate();
 }
 /* Ver.2.2.0: 原画表示中を即座に粗サムネ化する */
 /* Ver.2.3.5: 即時粗サムネ化も全員反映できるが、有効化できるのは投稿者だけ。
@@ -1650,11 +1667,14 @@ function expireImageNow(msgId, fromServer) {
 const meta = messageMeta[msgId];
 const imgEl = document.getElementById('img-' + msgId);
 if (!meta ||!imgEl || imgEl.dataset.expired === '1') return;
-clearImageExpireTimer(msgId);
-handleImageExpire(imgEl, msgId, meta.thumb || null);
+/* Ver.2.3.10: 自分の投稿の全員反映は、サーバーの配信が戻ってきてから適用する (エコー駆動)。
+   先に自分の画面だけ変えると、サーバーのクールダウンで弾かれた時に自分と他人の状態がズレるため。 */
 if (!fromServer && meta.senderSessionId && meta.senderSessionId === userSessionId) {
 try { socket.emit('expire_image', { roomId: currentRoomId, msgId: msgId }); } catch (e) {}
+return;
 }
+clearImageExpireTimer(msgId);
+handleImageExpire(imgEl, msgId, meta.thumb || null);
 }
 /* Ver.2.2.0: 粗サムネ化した原画を復元する。
 期限は「投稿から1時間まで」（サーバー削除と一致）。1時間経過後は復元不可。
@@ -1665,6 +1685,11 @@ function restoreImage(msgId, fromServer) {
 const meta = messageMeta[msgId];
 if (!meta || meta.thumbOnly ||!meta.image) return;
 if (Date.now() - (meta.postedAt || Date.now()) >= 3600 * 1000) return;
+/* Ver.2.3.10: expireImageNow と同じく、自分の投稿はサーバー配信のエコーで適用する */
+if (!fromServer && meta.senderSessionId && meta.senderSessionId === userSessionId) {
+try { socket.emit('restore_image', { roomId: currentRoomId, msgId: msgId }); } catch (e) {}
+return;
+}
 const container = document.getElementById('msg-' + msgId);
 const imgEl = document.getElementById('img-' + msgId);
 if (!container ||!imgEl) return;
@@ -1675,9 +1700,7 @@ meta.expired = false;
 meta.displaySeconds = 3600;
 startImageExpireTimer(imgEl, msgId, meta.thumb || null, 3600, meta.postedAt, true);
 scrollMessageFully(container);
-if (!fromServer && meta.senderSessionId && meta.senderSessionId === userSessionId) {
-try { socket.emit('restore_image', { roomId: currentRoomId, msgId: msgId }); } catch (e) {}
-}
+scheduleStripUpdate();
 }
 function startImageExpireTimer(imgEl, msgId, thumbBase64, displaySec, postedAt, isHistory) {
 if (!imgEl || displaySec <= 0) return;
@@ -1704,6 +1727,94 @@ startFromVisible();
 }, { threshold: 0.2});
 imageExpireObservers[msgId] = observer;
 observer.observe(imgEl);
+}
+/* Ver.2.3.11: 直近画像ストリップ。上へスクロールして見えなくなった画像を
+   チャット枠の1行目に常に5枚を左から並べる (狭い画面ではサムネが縮む)。満タン時は一番左が押し出される。
+   期限切れ/粗サムネのみの画像は粗サムネ (無ければ鍵タイル) で出す。タップでその発話へ移動。 */
+let stripUpdateQueued = false;
+function scheduleStripUpdate() {
+if (stripUpdateQueued) return;
+stripUpdateQueued = true;
+requestAnimationFrame(function() { stripUpdateQueued = false; updateRecentStrip();});
+}
+function stripCapacity(strip) {
+/* Ver.2.3.12: 枚数は常に5枚固定。狭い画面ではサムネ自体が縮む (CSSのflex+aspect-ratio)。 */
+return 5;
+}
+function stripSrcFor(meta) {
+if (!meta) return null;
+if (meta.thumbOnly || meta.expired) return meta.thumb || null;
+return meta.thumbMid || meta.image || meta.thumb || null;
+}
+function makeStripItem(msgId, src) {
+const item = document.createElement('div');
+item.className = 'strip-item enter';
+item.dataset.msgId = msgId;
+if (src) {
+const img = document.createElement('img');
+img.src = src;
+img.alt = '';
+item.appendChild(img);
+item.dataset.src = src;
+} else {
+const lock = document.createElement('div');
+lock.className = 'strip-lock';
+lock.textContent = '🔒';
+item.appendChild(lock);
+item.dataset.src = '';
+}
+item.addEventListener('click', function() {
+const target = document.getElementById('msg-' + msgId);
+if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
+return item;
+}
+function updateRecentStrip() {
+const strip = document.getElementById('recent-strip');
+const container = document.getElementById('chat-messages');
+if (!strip || !container) return;
+if (!currentRoomId) { strip.classList.remove('show'); strip.innerHTML = ''; return;}
+const chatRect = container.getBoundingClientRect();
+const above = [];
+container.querySelectorAll('.message').forEach(function(el) {
+if (!el.id || el.id.indexOf('msg-')!== 0) return;
+const msgId = el.id.slice(4);
+const meta = messageMeta[msgId];
+if (!meta || (!meta.image && !meta.thumb)) return;
+const r = el.getBoundingClientRect();
+if (r.bottom < chatRect.top + 4) above.push(msgId);
+});
+const cap = stripCapacity(strip);
+const desired = above.slice(-cap);
+const desiredSet = {};
+desired.forEach(function(id) { desiredSet[id] = true;});
+const existing = {};
+strip.querySelectorAll('.strip-item').forEach(function(node) { existing[node.dataset.msgId] = node;});
+const hasNewArrival = desired.some(function(id) { return !existing[id];});
+Object.keys(existing).forEach(function(id) {
+const node = existing[id];
+if (desiredSet[id]) return;
+if (desired.length >= cap && hasNewArrival) {
+node.classList.add('leaving');
+setTimeout(function() { if (node.parentNode) node.parentNode.removeChild(node);}, 260);
+} else if (node.parentNode) {
+node.parentNode.removeChild(node);
+}
+});
+desired.forEach(function(id) {
+const src = stripSrcFor(messageMeta[id]);
+let node = existing[id];
+if (node && (!node.parentNode || node.classList.contains('leaving'))) node = null;
+if (node && node.dataset.src!== (src || '')) {
+const fresh = makeStripItem(id, src);
+fresh.classList.remove('enter');
+node.parentNode.replaceChild(fresh, node);
+node = fresh;
+}
+if (!node) node = makeStripItem(id, src);
+strip.appendChild(node);
+});
+strip.classList.toggle('show', strip.querySelectorAll('.strip-item').length > 0);
 }
 function formatSecondsLabel(sec) { return sec >= 3600? '1時間': (sec + '秒'); }
 function renderSingleMessage(msg, isHistory) {
@@ -1759,6 +1870,7 @@ if (displaySec!== 0) startImageExpireTimer(imgEl, msg.id, msg.thumb || null, dis
 if (msg.forceExpired) expireImageNow(msg.id, true);
 }
 }
+scheduleStripUpdate();
 }
 function renderSystemNotification(text, msgId) {
 const container = document.getElementById('chat-messages');
@@ -2262,7 +2374,7 @@ if (Date.now() - (targetMsg.postedAt || Date.now()) >= 3600 * 1000) return;
 /* Ver.2.3.5: 全員への反映を有効化できるのは投稿者だけ */
 if (targetMsg.sessionId !== socket.data.sessionId) { logEvent('image_restore_denied_not_sender', { room: targetId, sid: shortId(socket.data.sessionId), msg: msgId }); return; }
 if (targetMsg.displaySeconds === 3600 && !targetMsg.forceExpired) return;
-if (Date.now() - (targetMsg.lastToggleAt || 0) < 1000) { logEvent('image_toggle_rate_limited', { room: targetId, sid: shortId(socket.data.sessionId), msg: msgId }); return; }
+if (Date.now() - (targetMsg.lastToggleAt || 0) < 500) { logEvent('image_toggle_rate_limited', { room: targetId, sid: shortId(socket.data.sessionId), msg: msgId }); socket.emit('image_toggle_rate_limited', { msgId: msgId }); return; }
 targetMsg.lastToggleAt = Date.now();
 targetMsg.displaySeconds = 3600;
 targetMsg.forceExpired = false;
@@ -2283,7 +2395,7 @@ if (targetMsg.displaySeconds === 0) return;
 /* Ver.2.3.5: 全員への即時粗サムネ化も投稿者だけ */
 if (targetMsg.sessionId !== socket.data.sessionId) { logEvent('image_expire_denied_not_sender', { room: targetId, sid: shortId(socket.data.sessionId), msg: msgId }); return; }
 if (targetMsg.forceExpired) return;
-if (Date.now() - (targetMsg.lastToggleAt || 0) < 1000) { logEvent('image_toggle_rate_limited', { room: targetId, sid: shortId(socket.data.sessionId), msg: msgId }); return; }
+if (Date.now() - (targetMsg.lastToggleAt || 0) < 500) { logEvent('image_toggle_rate_limited', { room: targetId, sid: shortId(socket.data.sessionId), msg: msgId }); socket.emit('image_toggle_rate_limited', { msgId: msgId }); return; }
 targetMsg.lastToggleAt = Date.now();
 targetMsg.forceExpired = true;
 targetMsg.forceExpiredAt = Date.now();
