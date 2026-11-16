@@ -401,7 +401,7 @@ flex-shrink: 0;
 .pull-indicator { position: absolute; top: 6px; left: 0; right: 0; display: none; justify-content: center; z-index: 3; pointer-events: none;}
 #recent-strip { display: none; gap: 6px; padding: 6px 8px; background: var(--card-bg); border-bottom: 1px solid var(--border-color); overflow: hidden; align-items: center; flex-shrink: 0;}
 #recent-strip.show { display: flex;}
-.strip-item { flex: 1 1 0; max-width: 54px; aspect-ratio: 54 / 40; border-radius: 6px; overflow: hidden; cursor: pointer; transition: flex 0.25s ease, max-width 0.25s ease, opacity 0.25s ease, margin-right 0.25s ease;}
+.strip-item { flex: 1 1 0; aspect-ratio: 54 / 40; border-radius: 6px; overflow: hidden; cursor: pointer; transition: flex 0.25s ease, max-width 0.25s ease, opacity 0.25s ease, margin-right 0.25s ease;}
 .strip-item img { width: 100%; height: 100%; object-fit: cover; display: block;}
 .strip-item.leaving { flex: 0 0 0; max-width: 0; opacity: 0; margin-right: -6px;}
 .strip-item.enter { animation: stripIn 0.25s ease;}
@@ -495,7 +495,7 @@ flex-shrink: 0;
 <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
 <span class="room-name" id="header-room-name">SimpleChatee</span>
 <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.12</span>
+<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.15</span>
 </div>
 <div class="header-members" id="header-room-id-container" style="display:none;">
 <div class="member-block">
@@ -1441,7 +1441,9 @@ noteActivity();
 setRoomTitle(currentRoomName);
 document.getElementById('header-copy-btn').style.display = (isPublicRoom || roomId === PUBLIC_ROOM_ID)? 'none': 'inline-flex';
 document.getElementById('header-room-id-container').style.display = 'flex';
-document.getElementById('display-time-control').style.display = 'flex';
+document.getElementById('display-time-control').style.display = (isPublicRoom || roomId === PUBLIC_ROOM_ID)? 'none': 'flex';
+const fileBtn = document.querySelector('.file-btn');
+if (fileBtn) fileBtn.style.display = (isPublicRoom || roomId === PUBLIC_ROOM_ID)? 'none': 'flex';
 const sel = document.getElementById('image-display-select');
 if (sel) sel.value = String(currentImageDisplaySeconds);
 document.getElementById('btn-delete-room').style.display = (isHost &&!isPublicRoom && roomId!== PUBLIC_ROOM_ID)? 'flex': 'none';
@@ -1449,10 +1451,16 @@ document.getElementById('btn-kick').style.display = (isHost &&!isPublicRoom && r
 if (Array.isArray(members)) updateMemberCount(members.length, currentMaxMembers, members);
 if (!isPublicRoom && roomId!== PUBLIC_ROOM_ID) {
 window.history.pushState({}, '', buildRoomUrl(currentRoomId, currentKey));
-const cm = document.getElementById('chat-messages');
-if (cm && !cm.dataset.stripBound) { cm.dataset.stripBound = '1'; cm.addEventListener('scroll', scheduleStripUpdate, { passive: true }); window.addEventListener('resize', scheduleStripUpdate); }
+stripIds = [];
+stripSeenOut = {};
+const stripEl = document.getElementById('recent-strip');
+if (stripEl) stripEl.innerHTML = '';
 scheduleStripUpdate();
 }
+stripIds = [];
+stripSeenOut = {};
+const stripEl2 = document.getElementById('recent-strip');
+if (stripEl2) stripEl2.innerHTML = '';
 showView('view-chat');
 const container = document.getElementById('chat-messages');
 container.innerHTML = '';
@@ -1542,6 +1550,11 @@ fetch('/api/ping').catch(function() {});
 }
 function stopKeepAlive() { if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null;}}
 function onFileSelected(input) {
+if (isPublicRoom || currentRoomId === PUBLIC_ROOM_ID) {
+input.value = '';
+showSoftToast('公開ルームでは画像を投稿できません');
+return;
+}
 if (input.files && input.files[0]) {
 selectedFile = input.files[0];
 const preview = document.getElementById('file-name-preview');
@@ -1728,10 +1741,13 @@ startFromVisible();
 imageExpireObservers[msgId] = observer;
 observer.observe(imgEl);
 }
-/* Ver.2.3.11: 直近画像ストリップ。上へスクロールして見えなくなった画像を
+/* Ver.2.3.11: 直近画像ストリップ。会話が進んで上へ見えなくなった画像を
+   (Ver.2.3.13: スクロール操作では内容を変えず、会話の進行でのみ追加/押し出しする)
    チャット枠の1行目に常に5枚を左から並べる (狭い画面ではサムネが縮む)。満タン時は一番左が押し出される。
    期限切れ/粗サムネのみの画像は粗サムネ (無ければ鍵タイル) で出す。タップでその発話へ移動。 */
 let stripUpdateQueued = false;
+let stripIds = [];
+let stripSeenOut = {};
 function scheduleStripUpdate() {
 if (stripUpdateQueued) return;
 stripUpdateQueued = true;
@@ -1784,8 +1800,15 @@ if (!meta || (!meta.image && !meta.thumb)) return;
 const r = el.getBoundingClientRect();
 if (r.bottom < chatRect.top + 4) above.push(msgId);
 });
+above.forEach(function(id) {
+if (!stripIds.includes(id) && !stripSeenOut[id]) stripIds.push(id);
+});
 const cap = stripCapacity(strip);
-const desired = above.slice(-cap);
+if (stripIds.length > cap) {
+stripIds.slice(0, stripIds.length - cap).forEach(function(id) { stripSeenOut[id] = true;});
+stripIds = stripIds.slice(-cap);
+}
+const desired = stripIds.slice();
 const desiredSet = {};
 desired.forEach(function(id) { desiredSet[id] = true;});
 const existing = {};
@@ -1966,12 +1989,17 @@ body { background: #000; color: #f8fafc; min-height: 100vh; display: flex; flex-
 img { max-width: 100vw; max-height: calc(100vh - 90px); object-fit: contain; user-select: none; -webkit-user-drag: none; -webkit-touch-callout: none; }
 #note { color: #94a3b8; font-size: 0.8rem; margin-top: 10px; text-align: center; line-height: 1.5; }
 #close-btn { margin-top: 14px; padding: 10px 22px; border: none; border-radius: 8px; background: #38bdf8; color: #0f172a; font-weight: bold; font-size: 0.9rem; cursor: pointer; }
+#expired-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.94); display: none; align-items: center; justify-content: center; z-index: 10; padding: 20px; }
+.expired-box { text-align: center; }
+#expired-msg { font-size: 1rem; line-height: 1.6; margin-bottom: 18px; }
+#expired-close-btn { padding: 12px 26px; border: none; border-radius: 8px; background: #38bdf8; color: #0f172a; font-weight: bold; font-size: 0.95rem; cursor: pointer; }
 </style>
 </head>
 <body>
 <img id="viewer-img" alt="画像" oncontextmenu="return false;">
 <div id="note">表示時間が過ぎると自動で消えます。このタブを閉じるとチャットに戻ります。</div>
 <button type="button" id="close-btn" onclick="window.close()">タブを閉じる</button>
+<div id="expired-overlay"><div class="expired-box"><div id="expired-msg">表示時間が過ぎたため、画像は表示できません。</div><button type="button" id="expired-close-btn" onclick="window.close()">タブを閉じる</button></div></div>
 <script>
 (function() {
 function parseHash() {
@@ -1996,7 +2024,9 @@ if (!isNaN(seconds) && seconds > 0 && seconds < 3600) {
 var remaining = seconds * 1000 - (Date.now() - postedAt);
 var expire = function() {
 img.remove();
-note.textContent = '表示時間が過ぎたため、画像は表示できません。このタブを閉じてください。';
+note.style.display = 'none';
+document.getElementById('close-btn').style.display = 'none';
+document.getElementById('expired-overlay').style.display = 'flex';
 };
 if (remaining <= 0) expire();
 else setTimeout(expire, remaining);
@@ -2329,13 +2359,25 @@ if (sender) { cancelPendingOffline(targetId, sender.sessionId); sender.awaySince
 room.lastActivityAt = Date.now();
 const ds = typeof displaySeconds === 'number'? displaySeconds: room.imageDisplaySeconds;
 const safeThumbMid = (typeof thumbMid === 'string' && /^\/uploads\/[A-Za-z0-9._-]+$/.test(thumbMid))? thumbMid: null;
+let effImage = image || null;
+let effThumbMid = safeThumbMid;
+let effThumb = thumb || null;
+if (room.isPublic && (effImage || effThumbMid || effThumb)) {
+/* Ver.2.3.15: 公開ルームは画像投稿なし。ファイル自体は掃除だけ予約して破棄する */
+if (effImage) scheduleImageDelete(effImage, ds);
+if (effThumbMid) scheduleImageDelete(effThumbMid, ds);
+logEvent('image_blocked_public', { room: targetId, sid: shortId(socket.data.sessionId) });
+effImage = null;
+effThumbMid = null;
+effThumb = null;
+}
 const messageData = {
 type: 'user', id: msgId || Math.random().toString(36).substring(2, 10), sessionId: sessionId,
 senderName: sender? sender.nickname: '匿名', colorIndex: sender? sender.colorIndex: 0,
-text, image: image || null, thumbMid: safeThumbMid, thumb: thumb || null, displaySeconds: ds, originalDisplaySeconds: ds, postedAt: Date.now()
+text, image: effImage, thumbMid: effThumbMid, thumb: effThumb, displaySeconds: ds, originalDisplaySeconds: ds, postedAt: Date.now()
 };
-if (image) scheduleImageDelete(image, ds);
-if (safeThumbMid) scheduleImageDelete(safeThumbMid, ds);
+if (effImage) scheduleImageDelete(effImage, ds);
+if (effThumbMid) scheduleImageDelete(effThumbMid, ds);
 room.messages.push(messageData);
 if (room.isPublic && room.messages.length > 100) {
 room.messages = room.messages.slice(-80);
