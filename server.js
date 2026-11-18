@@ -496,7 +496,7 @@ flex-shrink: 0;
 <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
 <span class="room-name" id="header-room-name">SimpleChatee</span>
 <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.25</span>
+<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.27</span>
 </div>
 <div class="header-members" id="header-room-id-container" style="display:none;">
 <div class="member-block">
@@ -599,6 +599,8 @@ flex-shrink: 0;
 </select>
 <span>粗サムネ品質</span>
 <select id="thumb-quality-select" onchange="changeThumbQuality()">
+<option value="0.1">0.1</option>
+<option value="0.2">0.2</option>
 <option value="0.3">0.3</option>
 <option value="0.4">0.4</option>
 <option value="0.5">0.5</option>
@@ -1156,7 +1158,9 @@ reader.onload = (e) => {
 const img = new Image();
 img.onload = () => {
 const canvas = document.createElement('canvas');
-const targetWidth = 128;
+/* Ver.2.3.26: 品質0.3は解像度も下げて一段と粗くする (品質だけでは粗さが足りないため) */
+/* Ver.2.3.27: 低品質側は解像度も段階的に落とす (0.1→32px / 0.2→48px / 0.3→64px / 0.4以上→128px) */
+const targetWidth = (currentThumbQuality <= 0.1)? 32: (currentThumbQuality <= 0.2)? 48: (currentThumbQuality <= 0.3)? 64: 128;
 const scale = targetWidth / img.width;
 canvas.width = targetWidth;
 canvas.height = Math.max(1, Math.round(img.height * scale));
@@ -1583,7 +1587,7 @@ socket.emit('change_image_display_time', { roomId: currentRoomId, seconds: secon
 function changeThumbQuality() {
 if (!isHost) return;
 const q = parseFloat(document.getElementById('thumb-quality-select').value);
-if (![0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1].includes(q)) return;
+if (![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1].includes(q)) return;
 noteActivity();
 socket.emit('change_thumb_quality', { roomId: currentRoomId, quality: q });
 }
@@ -2460,7 +2464,7 @@ socket.on('change_thumb_quality', ({ roomId, quality }) => {
 const room = rooms[roomId];
 if (!room) return;
 if (room.hostSessionId !== socket.data.sessionId) return;
-if (![0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1].includes(quality)) return;
+if (![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1].includes(quality)) return;
 room.thumbQuality = quality;
 room.lastActivityAt = Date.now();
 logEvent('thumb_quality_changed', { room: roomId, sid: shortId(socket.data.sessionId), quality: quality });
