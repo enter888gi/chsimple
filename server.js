@@ -496,7 +496,7 @@ flex-shrink: 0;
 <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
 <span class="room-name" id="header-room-name">SimpleChatee</span>
 <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.27</span>
+<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.28</span>
 </div>
 <div class="header-members" id="header-room-id-container" style="display:none;">
 <div class="member-block">
@@ -597,7 +597,7 @@ flex-shrink: 0;
 <option value="10">10秒</option>
 <option value="3600">1時間</option>
 </select>
-<span>粗サムネ品質</span>
+<span id="thumb-quality-label">粗サムネ品質</span>
 <select id="thumb-quality-select" onchange="changeThumbQuality()">
 <option value="0.1">0.1</option>
 <option value="0.2">0.2</option>
@@ -1470,7 +1470,10 @@ currentMaxMembers = maxMembers || 3;
 currentImageDisplaySeconds = imageDisplaySeconds || 5;
 currentThumbQuality = (typeof thumbQuality === 'number')? thumbQuality: 0.8;
 const qsel0 = document.getElementById('thumb-quality-select');
-if (qsel0) { qsel0.value = String(currentThumbQuality); qsel0.disabled = !isHost; }
+const qlabel0 = document.getElementById('thumb-quality-label');
+/* Ver.2.3.28: 品質の文言とセレクトは部屋主にだけ見せる */
+if (qsel0) { qsel0.value = String(currentThumbQuality); qsel0.style.display = isHost? '': 'none'; }
+if (qlabel0) qlabel0.style.display = isHost? '': 'none';
 noteActivity();
 setRoomTitle(currentRoomName);
 document.getElementById('header-copy-btn').style.display = (isPublicRoom || roomId === PUBLIC_ROOM_ID)? 'none': 'inline-flex';
