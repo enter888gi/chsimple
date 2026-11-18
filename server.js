@@ -438,7 +438,7 @@ flex-shrink: 0;
 .file-btn { background: #475569; color: white; padding: 12px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; margin: 0; width: 46px; height: 46px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;}
 .input-row textarea { margin: 0; min-height: 46px;}
 .input-row button { margin: 0; width: 52px; height: 46px; padding: 0; flex-shrink: 0; line-height: 1.15;}
-.security-disclaimer { font-size: 0.78rem; color: var(--text-muted); line-height: 1.45; margin-top: 2px; padding: 0 2px;}
+.security-disclaimer { font-size: 0.92rem; color: var(--text-muted); line-height: 1.45; margin-top: 2px; padding: 0 2px;}
 #full-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(4px); z-index: 9999; display: none; justify-content: center; align-items: center;}
 .toast-message { background: #ef4444; color: white; padding: 14px 28px; border-radius: 12px; font-weight: bold; font-size: 1rem; text-align: center;}
 .modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.75); z-index: 10000; display: none; justify-content: center; align-items: center;}
@@ -496,7 +496,7 @@ flex-shrink: 0;
 <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
 <span class="room-name" id="header-room-name">SimpleChatee</span>
 <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.22</span>
+<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.25</span>
 </div>
 <div class="header-members" id="header-room-id-container" style="display:none;">
 <div class="member-block">
@@ -599,6 +599,9 @@ flex-shrink: 0;
 </select>
 <span>粗サムネ品質</span>
 <select id="thumb-quality-select" onchange="changeThumbQuality()">
+<option value="0.3">0.3</option>
+<option value="0.4">0.4</option>
+<option value="0.5">0.5</option>
 <option value="0.6">0.6</option>
 <option value="0.7">0.7</option>
 <option value="0.8">0.8</option>
@@ -611,7 +614,7 @@ flex-shrink: 0;
 <textarea id="msg-input" placeholder="メッセージを入力..." oninput="handleTyping()" onkeydown="onKeyDown(event)"></textarea>
 <button type="button" onclick="sendMessage()">送<br>信</button>
 </div>
-<div class="security-disclaimer">🔒 チャット内容はE2E暗号化により管理者も閲覧不可です。画像は表示時間経過後にサーバーからも削除されます。</div>
+<div class="security-disclaimer">🕒指定の時間を過ぎたら自動でモザイクが入ります。<br>🔒 チャット内容はE2E暗号化により管理者も閲覧不可です。<br>🔒画像は表示時間経過後にサーバーからも安全に削除されます。</div>
 </div>
 </div>
 </div>
@@ -1580,7 +1583,7 @@ socket.emit('change_image_display_time', { roomId: currentRoomId, seconds: secon
 function changeThumbQuality() {
 if (!isHost) return;
 const q = parseFloat(document.getElementById('thumb-quality-select').value);
-if (![0.6, 0.7, 0.8, 0.9, 1].includes(q)) return;
+if (![0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1].includes(q)) return;
 noteActivity();
 socket.emit('change_thumb_quality', { roomId: currentRoomId, quality: q });
 }
@@ -1958,13 +1961,14 @@ const timestamp = date.getFullYear() + '/' + pad2(date.getMonth() + 1) + '/' + p
 html += '<div class="msg-head"><span class="sender">' + escapeHtml(msg.senderName) + '</span><span class="message-timestamp">(' + timestamp + ')</span>' + (isSelf? '<span class="del-btn" data-del="1">✕</span>': '') + '</div>';
 if (plainText) html += '<div class="text-content">' + escapeHtml(plainText) + '</div>';
 if (displaySec === 0 && msg.thumb) {
-html += '<img src="' + msg.thumb + '" class="chat-img-poster-thumb" style="cursor:default;" oncontextmenu="return false;">';
+/* Ver.2.3.24: 粗サムネのみ投稿も、サムネ左上に「⏱ 0秒表示」バッジを出す */
+html += '<span class="img-wrap"><img src="' + msg.thumb + '" class="chat-img-poster-thumb" style="cursor:default;" oncontextmenu="return false;"><span class="img-badge">⏱ ' + formatSecondsLabel(0) + '表示</span></span>';
 html += '<div class="poster-only-note">粗サムネのみ表示</div>';
 } else if (msg.image) {
 /* Ver.2.3.3: インラインは中サムネ (無ければ原画)。原画はタップ時の viewer だけが読む */
 html += '<span class="img-wrap"><img src="' + (msg.thumbMid || msg.image) + '" class="chat-img" id="img-' + msg.id + '" oncontextmenu="return false;">' + (originalDisplaySec > 0? '<span class="img-badge">⏱ ' + formatSecondsLabel(originalDisplaySec) + '表示</span>': '') + '</span>';
 } else if (msg.thumb) {
-html += '<img src="' + msg.thumb + '" class="chat-img-poster-thumb" style="cursor:default;" oncontextmenu="return false;">';
+html += '<span class="img-wrap"><img src="' + msg.thumb + '" class="chat-img-poster-thumb" style="cursor:default;" oncontextmenu="return false;">' + (originalDisplaySec > 0? '<span class="img-badge">⏱ ' + formatSecondsLabel(originalDisplaySec) + '表示</span>': '') + '</span>';
 html += '<div class="poster-only-note">粗サムネのみ表示</div>';
 }
 
@@ -2456,7 +2460,7 @@ socket.on('change_thumb_quality', ({ roomId, quality }) => {
 const room = rooms[roomId];
 if (!room) return;
 if (room.hostSessionId !== socket.data.sessionId) return;
-if (![0.6, 0.7, 0.8, 0.9, 1].includes(quality)) return;
+if (![0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1].includes(quality)) return;
 room.thumbQuality = quality;
 room.lastActivityAt = Date.now();
 logEvent('thumb_quality_changed', { room: roomId, sid: shortId(socket.data.sessionId), quality: quality });
