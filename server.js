@@ -122,7 +122,7 @@ id: PUBLIC_ROOM_ID,
 name: PUBLIC_ROOM_NAME,
 hostSessionId: null,
 maxMembers: PUBLIC_ROOM_MAX,
-imageDisplaySeconds: 5,
+imageDisplaySeconds: 5, thumbQuality: 0.8,
 members: [],
 messages: [],
 lastActivityAt: Date.now(),
@@ -422,7 +422,7 @@ flex-shrink: 0;
 .message .del-btn { margin-left: auto; cursor: pointer; color: #fca5a5; font-size: 0.75rem; opacity: 0.85; flex-shrink: 0; padding-left: 8px;}
 .system-notification { text-align: center; font-size: 0.75rem; color: var(--text-muted); margin: 4px 0; align-self: center;}
 .chat-img { max-width: 100%; max-height: 200px; border-radius: 8px; margin-top: 6px; cursor: pointer; user-select: none; -webkit-user-drag: none; display: block;}
-.chat-img-poster-thumb { width: 140px; height: auto; max-width: 100%; max-height: 200px; border-radius: 6px; margin-top: 6px; image-rendering: pixelated; border: 1px dashed #94a3b8; opacity: 0.85; display: block;}
+.chat-img-poster-thumb { width: auto; height: 200px; max-width: 100%; border-radius: 6px; margin-top: 6px; image-rendering: pixelated; border: 1px dashed #94a3b8; opacity: 0.85; display: block;}
 .expired-img-note { font-size: 0.72rem; color: #f87171; font-style: italic; margin-top: 4px;}
 .poster-only-note { font-size: 0.68rem; color: var(--text-muted); margin-top: 2px;}
 .message-timestamp { font-size: 0.62rem; color: var(--text-muted); line-height: 1.2; white-space: nowrap;}
@@ -451,6 +451,7 @@ flex-shrink: 0;
 .modal-member-list { max-height: 200px; overflow-y: auto; margin-bottom: 12px;}
 .modal-member-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-radius: 6px; background: #0f172a; margin-bottom: 6px; font-size: 0.85rem;}
 .modal-member-item button { width: auto; margin: 0; padding: 4px 10px; font-size: 0.75rem; background: #f59e0b; color: #0f172a;}
+#view-chat.drag-over { box-shadow: inset 0 0 0 2px var(--accent-color); }
 #image-modal { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.92); z-index: 10001; display: none; justify-content: center; align-items: center; padding: 12px;}
 #image-modal.active { display: flex;}
 #image-modal-img { max-width: 100vw; max-height: 100vh; object-fit: contain; border-radius: 4px; user-select: none; -webkit-user-drag: none;}
@@ -495,7 +496,7 @@ flex-shrink: 0;
 <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
 <span class="room-name" id="header-room-name">SimpleChatee</span>
 <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.18</span>
+<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.22</span>
 </div>
 <div class="header-members" id="header-room-id-container" style="display:none;">
 <div class="member-block">
@@ -596,6 +597,14 @@ flex-shrink: 0;
 <option value="10">10秒</option>
 <option value="3600">1時間</option>
 </select>
+<span>粗サムネ品質</span>
+<select id="thumb-quality-select" onchange="changeThumbQuality()">
+<option value="0.6">0.6</option>
+<option value="0.7">0.7</option>
+<option value="0.8">0.8</option>
+<option value="0.9">0.9</option>
+<option value="1">1.0</option>
+</select>
 </div>
 <div class="input-row">
 <label class="file-btn">📷<input type="file" id="file-input" accept="image/*" style="display:none;" onchange="onFileSelected(this)"></label>
@@ -640,6 +649,7 @@ let selectedFile = null;
 let isHost = false;
 let currentMaxMembers = 3;
 let currentImageDisplaySeconds = 5;
+let currentThumbQuality = 0.8;
 let keepAliveTimer = null;
 let lastChatActivityAt = Date.now();
 let pendingKickSessionId = null;
@@ -889,6 +899,7 @@ currentRoomId = res.roomId || PUBLIC_ROOM_ID;
 currentRoomName = res.roomName || '公開ルーム';
 currentMaxMembers = res.maxMembers || 50;
 currentImageDisplaySeconds = res.imageDisplaySeconds || 5;
+if (typeof res.thumbQuality === 'number') currentThumbQuality = res.thumbQuality;
 isPublicRoom = true;
 setupChatView(currentRoomId, currentRoomName, res.messages || [], currentMaxMembers, currentImageDisplaySeconds, res.members || []);
 document.getElementById('header-copy-btn').style.display = 'none';
@@ -941,6 +952,11 @@ currentImageDisplaySeconds = data.imageDisplaySeconds;
 const sel = document.getElementById('image-display-select');
 if (sel) sel.value = String(data.imageDisplaySeconds);
 }
+if (typeof data.thumbQuality === 'number') {
+currentThumbQuality = data.thumbQuality;
+const qsel = document.getElementById('thumb-quality-select');
+if (qsel) qsel.value = String(data.thumbQuality);
+}
 if (refreshing) document.getElementById('chat-messages').innerHTML = '';
 if (Array.isArray(data.messages)) {
 data.messages.forEach(function(msg) {
@@ -981,6 +997,14 @@ if (!data) return;
 currentImageDisplaySeconds = data.seconds;
 const sel = document.getElementById('image-display-select');
 if (sel) sel.value = String(data.seconds);
+noteActivity();
+renderSystemNotification(data.text, data.id);
+});
+socket.on('thumb_quality_changed', function(data) {
+if (!data || typeof data.quality !== 'number') return;
+currentThumbQuality = data.quality;
+const qsel = document.getElementById('thumb-quality-select');
+if (qsel) qsel.value = String(data.quality);
 noteActivity();
 });
 socket.on('display_typing', function(data) {
@@ -1129,13 +1153,13 @@ reader.onload = (e) => {
 const img = new Image();
 img.onload = () => {
 const canvas = document.createElement('canvas');
-const targetWidth = 48;
+const targetWidth = 128;
 const scale = targetWidth / img.width;
 canvas.width = targetWidth;
 canvas.height = Math.max(1, Math.round(img.height * scale));
 const ctx = canvas.getContext('2d');
 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-resolve(canvas.toDataURL('image/jpeg', 0.35));
+resolve(canvas.toDataURL('image/jpeg', currentThumbQuality));
 };
 img.src = e.target.result;
 };
@@ -1349,7 +1373,7 @@ return;
 currentRoomId = res.roomId;
 currentRoomName = res.roomName || name;
 saveRoomToStorage(currentRoomId, currentRoomName, myNickname, currentKey, true);
-setupChatView(currentRoomId, currentRoomName, res.messages || [], maxMembers, res.imageDisplaySeconds || 5, res.members || [myNickname]);
+setupChatView(currentRoomId, currentRoomName, res.messages || [], maxMembers, res.imageDisplaySeconds || 5, res.members || [myNickname], res.thumbQuality);
 startKeepAlive();
 });
 }
@@ -1374,6 +1398,7 @@ currentRoomId = res.roomId;
 currentRoomName = res.roomName || currentRoomName;
 currentMaxMembers = res.maxMembers || 3;
 currentImageDisplaySeconds = res.imageDisplaySeconds || 5;
+if (typeof res.thumbQuality === 'number') currentThumbQuality = res.thumbQuality;
 saveRoomToStorage(currentRoomId, currentRoomName, myNickname, currentKey, isHost);
 setupChatView(currentRoomId, currentRoomName, res.messages || [], currentMaxMembers, currentImageDisplaySeconds, res.members || []);
 if (isHost) startKeepAlive();
@@ -1431,11 +1456,14 @@ if (!res ||!res.success) alert((res && res.error) || '退室させられませ�
 });
 };
 
-function setupChatView(roomId, roomName, messages, maxMembers, imageDisplaySeconds, members) {
+function setupChatView(roomId, roomName, messages, maxMembers, imageDisplaySeconds, members, thumbQuality) {
 currentRoomId = roomId;
 currentRoomName = roomName || roomId;
 currentMaxMembers = maxMembers || 3;
 currentImageDisplaySeconds = imageDisplaySeconds || 5;
+currentThumbQuality = (typeof thumbQuality === 'number')? thumbQuality: 0.8;
+const qsel0 = document.getElementById('thumb-quality-select');
+if (qsel0) { qsel0.value = String(currentThumbQuality); qsel0.disabled = !isHost; }
 noteActivity();
 setRoomTitle(currentRoomName);
 document.getElementById('header-copy-btn').style.display = (isPublicRoom || roomId === PUBLIC_ROOM_ID)? 'none': 'inline-flex';
@@ -1460,6 +1488,19 @@ stripIds = [];
 stripSeenOut = {};
 const stripEl2 = document.getElementById('recent-strip');
 if (stripEl2) stripEl2.innerHTML = '';
+const chatView = document.getElementById('view-chat');
+if (chatView && !chatView.dataset.dndBound) {
+chatView.dataset.dndBound = '1';
+chatView.addEventListener('dragover', function(e) { e.preventDefault(); chatView.classList.add('drag-over'); });
+chatView.addEventListener('dragleave', function(e) { if (e.relatedTarget && chatView.contains(e.relatedTarget)) return; chatView.classList.remove('drag-over'); });
+chatView.addEventListener('drop', function(e) {
+e.preventDefault();
+chatView.classList.remove('drag-over');
+if (!currentRoomId) return;
+const files = Array.prototype.slice.call((e.dataTransfer && e.dataTransfer.files) || []).filter(function(f) { return f.type && f.type.indexOf('image/') === 0; });
+files.forEach(function(f) { postImageFile(f); });
+});
+}
 showView('view-chat');
 const container = document.getElementById('chat-messages');
 container.innerHTML = '';
@@ -1535,6 +1576,14 @@ if (isNaN(seconds) || ![0, 1, 2, 3, 5, 10, 3600].includes(seconds)) return;
 noteActivity();
 socket.emit('change_image_display_time', { roomId: currentRoomId, seconds: seconds});
 }
+/* Ver.2.3.21: 粗サムネ品質は部屋主だけが変更できる。変更しても何も表示しない */
+function changeThumbQuality() {
+if (!isHost) return;
+const q = parseFloat(document.getElementById('thumb-quality-select').value);
+if (![0.6, 0.7, 0.8, 0.9, 1].includes(q)) return;
+noteActivity();
+socket.emit('change_thumb_quality', { roomId: currentRoomId, quality: q });
+}
 function startKeepAlive() {
 stopKeepAlive();
 if (!isHost) return;
@@ -1548,6 +1597,46 @@ fetch('/api/ping').catch(function() {});
 }, 60 * 1000);
 }
 function stopKeepAlive() { if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null;}}
+/* Ver.2.3.22: ドラッグ&ドロップで落とされた画像を、現在の設定のまま即時投稿する */
+async function postImageFile(file) {
+if (!file || !currentKey) return;
+if (isPublicRoom || currentRoomId === PUBLIC_ROOM_ID) { showSoftToast('公開ルームでは画像を投稿できません'); return; }
+stopTyping();
+noteActivity();
+let thumbBase64 = null;
+try { thumbBase64 = await createUltraLightThumbnail(file); } catch (e) {}
+const displaySeconds = currentImageDisplaySeconds;
+let imageUrl = null;
+let thumbMidUrl = null;
+if (displaySeconds !== 0) {
+const formData = new FormData();
+formData.append('image', file);
+try {
+const res = await fetch('/api/upload', { method: 'POST', body: formData });
+const data = await res.json();
+imageUrl = data.imageUrl;
+} catch (e) { showSoftToast('画像のアップロードに失敗しました'); return; }
+try {
+const midBlob = await createMidThumbnailBlob(file);
+if (midBlob) {
+const midForm = new FormData();
+midForm.append('image', midBlob, 'thumb.jpg');
+const midRes = await fetch('/api/upload', { method: 'POST', body: midForm });
+const midData = await midRes.json();
+if (midData && midData.imageUrl) thumbMidUrl = midData.imageUrl;
+}
+} catch (e) {}
+}
+socket.emit('send_message', {
+msgId: Math.random().toString(36).substring(2, 10),
+roomId: currentRoomId,
+text: '',
+image: imageUrl,
+thumbMid: thumbMidUrl,
+thumb: thumbBase64,
+displaySeconds: displaySeconds
+});
+}
 function onFileSelected(input) {
 if (isPublicRoom || currentRoomId === PUBLIC_ROOM_ID) {
 input.value = '';
@@ -1936,10 +2025,19 @@ imageModalOpenedAt = Date.now();
 note.textContent = (meta.originalDisplaySeconds > 0)? '⏱ ' + formatSecondsLabel(meta.originalDisplaySeconds) + '表示で投稿': '';
 img.src = meta.image;
 img.style.imageRendering = 'auto';
+img.style.width = '';
+img.style.height = '';
+img.style.maxWidth = '';
+img.style.maxHeight = '';
 if (meta.thumb && meta.displaySeconds < 3600) {
 imageModalTimer = setTimeout(function() {
 img.src = meta.thumb;
 img.style.imageRendering = 'pixelated';
+/* Ver.2.3.19: 粗サムネは48px幅の原寸で出すと全画面モーダルの中央に小さな点のように見えて変だったため、チャット内の粗サムネと同じ大きさに揃える */
+/* Ver.2.3.20: その揃え方を「高さ200px基準」に統一 (幅は縦横比から自動、吹き出し幅が上限) */
+img.style.width = 'auto';
+img.style.height = '200px';
+img.style.maxWidth = '100%';
 note.textContent = '時間経過につき粗サムネのみ表示' + ((meta.originalDisplaySeconds > 0)? '（⏱ ' + formatSecondsLabel(meta.originalDisplaySeconds) + '表示で投稿）': '');
 }, Math.max(1000, meta.displaySeconds * 1000));
 }
@@ -2110,7 +2208,7 @@ try { syncBytes = JSON.stringify(syncMessages).length; } catch (e) {}
 logEvent('room_state_sync', { room: roomId, sid: shortId(targetSocket.data.sessionId), messages: syncMessages.length, totalMessages: room.messages.length, bytes: syncBytes });
 targetSocket.emit('room_state_sync', {
 roomId: roomId, roomName: room.name, count: active.length, maxMembers: room.maxMembers,
-members: active.map(m => m.nickname), imageDisplaySeconds: room.imageDisplaySeconds, messages: syncMessages
+members: active.map(m => m.nickname), imageDisplaySeconds: room.imageDisplaySeconds, thumbQuality: (typeof room.thumbQuality === 'number')? room.thumbQuality: 0.8, messages: syncMessages
 });
 }
 socket.on('keep_alive', () => {});
@@ -2183,7 +2281,7 @@ name: roomName,
 waitingMsg: wMsg,
 hostSessionId: sessionId,
 maxMembers: safeMax,
-imageDisplaySeconds: 5,
+imageDisplaySeconds: 5, thumbQuality: 0.8,
 members: [{ id: socket.id, sessionId, nickname: nick, colorIndex: 0}],
 joinedSessionIds: [sessionId],
 messages: [initialSystemMsg],
@@ -2195,7 +2293,7 @@ socket.join(roomId);
 setSocketSession(roomId, sessionId);
 safeCallback(callback, {
 success: true, roomId, roomName, messages: [initialSystemMsg], isHost: true,
-maxMembers: safeMax, imageDisplaySeconds: 5, memberCount: 1, members: [nick]
+maxMembers: safeMax, imageDisplaySeconds: 5, thumbQuality: 0.8, memberCount: 1, members: [nick]
 });
 emitMemberCount(roomId);
 } catch (err) {
@@ -2252,7 +2350,7 @@ trimPrivateHistory(room);
 }
 safeCallback(callback, {
 success: true, roomId: id, roomName: room.name, messages: recentMessages(room), isHost: room.hostSessionId === sessionId,
-maxMembers: room.maxMembers, imageDisplaySeconds: room.imageDisplaySeconds,
+maxMembers: room.maxMembers, imageDisplaySeconds: room.imageDisplaySeconds, thumbQuality: (typeof room.thumbQuality === 'number')? room.thumbQuality: 0.8,
 memberCount: getActiveMembers(room).length, members: getMemberNames(room)
 });
 setTimeout(() => { if (rooms[id]) { if (systemMsg) io.to(id).emit('receive_message', systemMsg); emitMemberCount(id);}}, 0);
@@ -2345,8 +2443,25 @@ const room = rooms[roomId];
 if (!room || ![0, 1, 2, 3, 5, 10, 3600].includes(seconds)) return;
 room.imageDisplaySeconds = seconds;
 room.lastActivityAt = Date.now();
-/* Ver.2.3.16: 切り替わりました通知は出さない (設定の同期だけ静かに行う) */
-io.to(roomId).emit('image_display_changed', { seconds: seconds });
+/* Ver.2.3.21: 切り替えるたびにグレーのテキストを出す仕様に戻す (2.3.16で消したもの) */
+let label = seconds + '秒';
+if (seconds === 0) label = '粗サムネのみ';
+else if (seconds === 3600) label = '1時間';
+const systemMsg = { type: 'system', id: 'system-' + Math.random().toString(36).substring(2, 10), text: '画像表示時間が' + label + 'に切り替わりました'};
+room.messages.push(systemMsg);
+io.to(roomId).emit('image_display_changed', { seconds: seconds, text: systemMsg.text, id: systemMsg.id });
+});
+
+socket.on('change_thumb_quality', ({ roomId, quality }) => {
+const room = rooms[roomId];
+if (!room) return;
+if (room.hostSessionId !== socket.data.sessionId) return;
+if (![0.6, 0.7, 0.8, 0.9, 1].includes(quality)) return;
+room.thumbQuality = quality;
+room.lastActivityAt = Date.now();
+logEvent('thumb_quality_changed', { room: roomId, sid: shortId(socket.data.sessionId), quality: quality });
+/* Ver.2.3.21: 品質変更では何も表示しない (履歴にも残さない) */
+io.to(roomId).emit('thumb_quality_changed', { quality: quality });
 });
 
 socket.on('typing_start', ({ roomId}) => {
