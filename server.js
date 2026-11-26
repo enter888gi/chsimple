@@ -135,6 +135,28 @@ return rooms[PUBLIC_ROOM_ID];
 }
 ensurePublicRoom();
 
+/* Ver.2.3.29: チャットの合言葉でサーバー全体をリセットする */
+let pendingServerReset = null;
+function performServerReset(bySessionId) {
+logEvent('server_reset', { sid: shortId(bySessionId) });
+pendingServerReset = null;
+io.emit('server_reset', {});
+for (const s of io.sockets.sockets.values()) {
+for (const r of Array.from(s.rooms)) { if (r !== s.id) s.leave(r); }
+s.data.roomId = null;
+}
+for (const k of Object.keys(disconnectTimers)) { clearTimeout(disconnectTimers[k]); delete disconnectTimers[k]; }
+for (const id of Object.keys(rooms)) delete rooms[id];
+for (const name of Object.keys(roomNameToId)) delete roomNameToId[name];
+for (const c of Object.keys(shortLinks)) delete shortLinks[c];
+for (const k of Object.keys(shortLinkByRoomKey)) delete shortLinkByRoomKey[k];
+fs.readdir(uploadDir, (err, files) => {
+if (err || !files) return;
+files.forEach(f => { fs.unlink(path.join(uploadDir, f), () => {}); });
+});
+ensurePublicRoom();
+}
+
 function generateRoomId() {
 const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
 let id;
@@ -226,6 +248,14 @@ if (fs.existsSync(filePath)) fs.unlink(filePath, () => {});
 if (msg.thumbMid) {
 const thumbPath = path.join(uploadDir, path.basename(msg.thumbMid));
 if (fs.existsSync(thumbPath)) fs.unlink(thumbPath, () => {});
+}
+if (msg.mosaic) {
+const mosaicPath = path.join(uploadDir, path.basename(msg.mosaic));
+if (fs.existsSync(mosaicPath)) fs.unlink(mosaicPath, () => {});
+}
+if (msg.mosaicRect) {
+const mosaicRectPath = path.join(uploadDir, path.basename(msg.mosaicRect));
+if (fs.existsSync(mosaicRectPath)) fs.unlink(mosaicRectPath, () => {});
 }
 });
 if (room.name && roomNameToId[room.name] === roomId) {
@@ -421,6 +451,26 @@ flex-shrink: 0;
 .message .text-content { white-space: pre-wrap;}
 .message .del-btn { margin-left: auto; cursor: pointer; color: #fca5a5; font-size: 0.75rem; opacity: 0.85; flex-shrink: 0; padding-left: 8px;}
 .system-notification { text-align: center; font-size: 0.75rem; color: var(--text-muted); margin: 4px 0; align-self: center;}
+.reset-prompt { align-self: center; text-align: center; background: rgba(128, 128, 128, 0.14); border-radius: 10px; padding: 8px 16px; margin: 4px 0; font-size: 0.82rem;}
+.reset-prompt-title { font-weight: bold; font-size: 0.7rem; color: var(--text-muted); margin-bottom: 2px;}
+#mosaic-modal { position: fixed; inset: 0; background: rgba(10, 10, 14, 0.96); z-index: 400; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 14px; box-sizing: border-box;}
+#mosaic-modal.active { display: flex;}
+#mosaic-close { position: absolute; top: max(12px, env(safe-area-inset-top)); right: 14px; width: 52px; height: 52px; border-radius: 50%; border: none; background: rgba(255,255,255,0.16); color: #fff; font-size: 1.5rem; line-height: 1; cursor: pointer; z-index: 2;}
+#mosaic-stage { position: relative; touch-action: none; line-height: 0;}
+#mosaic-canvas { max-width: 94vw; max-height: 58vh; border-radius: 6px;}
+.mosaic-region { position: absolute; border: 2px dashed #fff; cursor: move; box-sizing: border-box;}
+.mosaic-region.circle { border-radius: 50%;}
+.mosaic-region.selected { border: 2px solid var(--accent-color);}
+.mosaic-handle { position: absolute; right: -14px; bottom: -14px; width: 28px; height: 28px; border-radius: 50%; background: #fff; border: 2px solid #888; cursor: nwse-resize; box-sizing: border-box;}
+.mosaic-add-row { display: flex; gap: 10px;}
+.mosaic-add-row button { flex: 1; padding: 9px; border: none; border-radius: 10px; font-size: 0.85rem; cursor: pointer;}
+#mosaic-controls { width: min(94vw, 520px); display: flex; flex-direction: column; gap: 10px;}
+.mosaic-strength-row { display: flex; align-items: center; gap: 10px; color: #fff; font-size: 0.85rem;}
+.mosaic-strength-row input[type="range"] { flex: 1;}
+.mosaic-btn-row { display: flex; gap: 10px;}
+.mosaic-btn-row button { flex: 1; padding: 12px; border: none; border-radius: 10px; font-size: 1rem; cursor: pointer;}
+.mosaic-sub-btn { background: rgba(255,255,255,0.16); color: #fff;}
+.mosaic-ok-btn { background: var(--accent-color); color: #fff; font-weight: bold;}
 .chat-img { max-width: 100%; max-height: 200px; border-radius: 8px; margin-top: 6px; cursor: pointer; user-select: none; -webkit-user-drag: none; display: block;}
 .chat-img-poster-thumb { width: auto; height: 200px; max-width: 100%; border-radius: 6px; margin-top: 6px; image-rendering: pixelated; border: 1px dashed #94a3b8; opacity: 0.85; display: block;}
 .expired-img-note { font-size: 0.72rem; color: #f87171; font-style: italic; margin-top: 4px;}
@@ -465,6 +515,24 @@ flex-shrink: 0;
 <body>
 <div id="full-overlay"><div class="toast-message" id="toast-text">現在満員です</div></div>
 <div id="soft-toast" class="soft-toast">右クリックできません</div>
+<div id="mosaic-modal">
+<button type="button" id="mosaic-close" onclick="closeMosaicEditor()">✕</button>
+<div id="mosaic-stage">
+<canvas id="mosaic-canvas"></canvas>
+</div>
+<div id="mosaic-controls">
+<div class="mosaic-strength-row"><span>モザイクの強さ</span><input type="range" id="mosaic-strength" min="8" max="64" step="2" value="26"></div>
+<div class="mosaic-add-row">
+<button type="button" class="mosaic-sub-btn" onclick="addMosaicRegion('circle')">丸を追加</button>
+<button type="button" class="mosaic-sub-btn" onclick="addMosaicRegion('rect')">四角を追加</button>
+<button type="button" class="mosaic-sub-btn" id="mosaic-del-btn" onclick="deleteSelectedMosaicRegion()">選択中を削除</button>
+</div>
+<div class="mosaic-btn-row">
+<button type="button" class="mosaic-sub-btn" onclick="resetMosaicEditor()">やり直し</button>
+<button type="button" class="mosaic-ok-btn" onclick="confirmMosaicPost()">決定</button>
+</div>
+</div>
+</div>
 <div id="image-modal" onclick="closeImageModal(event)">
 <button type="button" id="image-modal-close" onclick="closeImageModal(event)" aria-label="閉じる">×</button>
 <div id="image-modal-inner">
@@ -496,7 +564,7 @@ flex-shrink: 0;
 <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
 <span class="room-name" id="header-room-name">SimpleChatee</span>
 <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.28</span>
+<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.30</span>
 </div>
 <div class="header-members" id="header-room-id-container" style="display:none;">
 <div class="member-block">
@@ -613,6 +681,7 @@ flex-shrink: 0;
 </div>
 <div class="input-row">
 <label class="file-btn">📷<input type="file" id="file-input" accept="image/*" style="display:none;" onchange="onFileSelected(this)"></label>
+<label class="file-btn" id="mosaic-btn" title="モザイク投稿">🌀<input type="file" id="mosaic-file-input" accept="image/*" style="display:none;" onchange="onMosaicFileSelected(this)"></label>
 <textarea id="msg-input" placeholder="メッセージを入力..." oninput="handleTyping()" onkeydown="onKeyDown(event)"></textarea>
 <button type="button" onclick="sendMessage()">送<br>信</button>
 </div>
@@ -655,6 +724,8 @@ let isHost = false;
 let currentMaxMembers = 3;
 let currentImageDisplaySeconds = 5;
 let currentThumbQuality = 0.8;
+let pendingResetMine = false;
+let pendingResetTimer = null;
 let keepAliveTimer = null;
 let lastChatActivityAt = Date.now();
 let pendingKickSessionId = null;
@@ -1011,6 +1082,37 @@ currentThumbQuality = data.quality;
 const qsel = document.getElementById('thumb-quality-select');
 if (qsel) qsel.value = String(data.quality);
 noteActivity();
+});
+function renderResetPrompt() {
+const container = document.getElementById('chat-messages');
+if (!container) return;
+const div = document.createElement('div');
+div.className = 'reset-prompt';
+div.innerHTML = '<div class="reset-prompt-title">システム</div><div>サーバーをリセットしますか？</div>';
+container.appendChild(div);
+container.scrollTop = container.scrollHeight;
+}
+socket.on('reset_prompt', function(data) {
+renderResetPrompt();
+if (data && data.bySessionId === userSessionId) {
+pendingResetMine = true;
+if (pendingResetTimer) clearTimeout(pendingResetTimer);
+pendingResetTimer = setTimeout(function() { pendingResetMine = false; }, 60000);
+}
+});
+socket.on('server_reset', function() {
+pendingResetMine = false;
+showSoftToast('サーバーがリセットされました');
+goHome(true);
+});
+socket.on('mosaic_toggled', function(data) {
+if (!data) return;
+const meta = messageMeta[data.messageId];
+if (!meta) return;
+meta.mosaicOff = !!data.mosaicOff;
+const imgEl = document.getElementById('img-' + data.messageId);
+if (imgEl && !meta.expired) imgEl.src = meta.mosaicOff? (meta.mosaicRect || meta.image): (meta.thumbMid || meta.mosaic || meta.image);
+scheduleStripUpdate();
 });
 socket.on('display_typing', function(data) {
 document.getElementById('typing-indicator').innerText = data.isTyping? (data.nickname + ' が入力中...'): '';
@@ -1481,6 +1583,8 @@ document.getElementById('header-room-id-container').style.display = 'flex';
 document.getElementById('display-time-control').style.display = (isPublicRoom || roomId === PUBLIC_ROOM_ID)? 'none': 'flex';
 const fileBtn = document.querySelector('.file-btn');
 if (fileBtn) fileBtn.style.display = (isPublicRoom || roomId === PUBLIC_ROOM_ID)? 'none': 'flex';
+const mosaicBtn = document.getElementById('mosaic-btn');
+if (mosaicBtn) mosaicBtn.style.display = (isPublicRoom || roomId === PUBLIC_ROOM_ID)? 'none': 'flex';
 const sel = document.getElementById('image-display-select');
 if (sel) sel.value = String(currentImageDisplaySeconds);
 document.getElementById('btn-delete-room').style.display = (isHost &&!isPublicRoom && roomId!== PUBLIC_ROOM_ID)? 'flex': 'none';
@@ -1647,6 +1751,275 @@ thumb: thumbBase64,
 displaySeconds: displaySeconds
 });
 }
+/* Ver.2.3.30: モザイク投稿エディタ (専用ボタンから)。丸/四角の範囲を複数置ける。
+   Ctrl+Shiftのオン/オフ切替は丸範囲だけが対象 (四角は常時モザイク)。 */
+let mosaicFile = null;
+let mosaicImg = null;
+let mosaicBase = null;
+let mosaicRegions = [];
+let mosaicSelected = -1;
+function onMosaicFileSelected(input) {
+const file = input.files && input.files[0];
+input.value = '';
+if (!file) return;
+if (isPublicRoom || currentRoomId === PUBLIC_ROOM_ID) { showSoftToast('公開ルームでは画像を投稿できません'); return; }
+if (!currentKey) { showSoftToast('暗号化鍵がありません'); return; }
+mosaicFile = file;
+const url = URL.createObjectURL(file);
+const img = new Image();
+img.onload = function() { mosaicImg = img; openMosaicEditor(); };
+img.onerror = function() { URL.revokeObjectURL(url); showSoftToast('画像を読み込めませんでした'); };
+img.src = url;
+}
+function openMosaicEditor() {
+const canvas = document.getElementById('mosaic-canvas');
+const scale = Math.min(1, 1280 / Math.max(mosaicImg.naturalWidth, mosaicImg.naturalHeight));
+canvas.width = Math.max(1, Math.round(mosaicImg.naturalWidth * scale));
+canvas.height = Math.max(1, Math.round(mosaicImg.naturalHeight * scale));
+mosaicBase = document.createElement('canvas');
+mosaicBase.width = canvas.width;
+mosaicBase.height = canvas.height;
+mosaicBase.getContext('2d').drawImage(mosaicImg, 0, 0, canvas.width, canvas.height);
+document.getElementById('mosaic-strength').value = '26';
+resetMosaicRegions();
+document.getElementById('mosaic-modal').classList.add('active');
+bindMosaicPointer();
+renderMosaicCanvas();
+}
+function defaultCircleRegion() {
+const canvas = document.getElementById('mosaic-canvas');
+return { shape: 'circle', cx: canvas.width / 2, cy: canvas.height / 2, r: Math.min(canvas.width, canvas.height) * 0.22 };
+}
+function resetMosaicRegions() {
+mosaicRegions = [defaultCircleRegion()];
+mosaicSelected = 0;
+}
+function resetMosaicEditor() {
+document.getElementById('mosaic-strength').value = '26';
+resetMosaicRegions();
+renderMosaicCanvas();
+}
+function addMosaicRegion(shape) {
+const canvas = document.getElementById('mosaic-canvas');
+const off = mosaicRegions.length * 18;
+let region;
+if (shape === 'rect') {
+const w = canvas.width * 0.34, h = canvas.height * 0.3;
+region = { shape: 'rect', x: (canvas.width - w) / 2 + off, y: (canvas.height - h) / 2 + off, w: w, h: h };
+} else {
+region = defaultCircleRegion();
+region.cx += off; region.cy += off;
+}
+clampMosaicRegion(region);
+mosaicRegions.push(region);
+mosaicSelected = mosaicRegions.length - 1;
+renderMosaicCanvas();
+}
+function deleteSelectedMosaicRegion() {
+if (mosaicSelected < 0 || !mosaicRegions[mosaicSelected]) return;
+mosaicRegions.splice(mosaicSelected, 1);
+mosaicSelected = mosaicRegions.length? mosaicRegions.length - 1: -1;
+renderMosaicCanvas();
+}
+function closeMosaicEditor() {
+document.getElementById('mosaic-modal').classList.remove('active');
+mosaicFile = null;
+mosaicImg = null;
+mosaicRegions = [];
+mosaicSelected = -1;
+}
+function mosaicBlockSize() { return parseInt(document.getElementById('mosaic-strength').value, 10) || 26; }
+function applyMosaicRegion(ctx, region, block) {
+let x, y, w, h;
+if (region.shape === 'circle') { x = region.cx - region.r; y = region.cy - region.r; w = region.r * 2; h = region.r * 2; }
+else { x = region.x; y = region.y; w = region.w; h = region.h; }
+const sw = Math.max(1, Math.round(w / block));
+const sh = Math.max(1, Math.round(h / block));
+const small = document.createElement('canvas');
+small.width = sw; small.height = sh;
+small.getContext('2d').drawImage(mosaicBase, x, y, w, h, 0, 0, sw, sh);
+ctx.save();
+ctx.beginPath();
+if (region.shape === 'circle') ctx.arc(region.cx, region.cy, region.r, 0, Math.PI * 2);
+else ctx.rect(region.x, region.y, region.w, region.h);
+ctx.clip();
+ctx.imageSmoothingEnabled = false;
+ctx.drawImage(small, 0, 0, sw, sh, x, y, w, h);
+ctx.restore();
+}
+function drawMosaicVariant(ctx, filter) {
+ctx.drawImage(mosaicBase, 0, 0);
+const block = mosaicBlockSize();
+mosaicRegions.forEach(function(region) {
+if (filter === 'rect' && region.shape !== 'rect') return;
+applyMosaicRegion(ctx, region, block);
+});
+}
+function renderMosaicCanvas() {
+const canvas = document.getElementById('mosaic-canvas');
+if (!canvas || !mosaicBase) return;
+drawMosaicVariant(canvas.getContext('2d'), 'all');
+renderMosaicOverlays();
+}
+function renderMosaicOverlays() {
+const stage = document.getElementById('mosaic-stage');
+const canvas = document.getElementById('mosaic-canvas');
+if (!stage || !canvas) return;
+stage.querySelectorAll('.mosaic-region').forEach(function(el) { el.remove(); });
+mosaicRegions.forEach(function(region, idx) {
+const el = document.createElement('div');
+el.className = 'mosaic-region' + (region.shape === 'circle'? ' circle': '') + (idx === mosaicSelected? ' selected': '');
+el.dataset.idx = String(idx);
+let x, y, w, h;
+if (region.shape === 'circle') { x = region.cx - region.r; y = region.cy - region.r; w = region.r * 2; h = region.r * 2; }
+else { x = region.x; y = region.y; w = region.w; h = region.h; }
+el.style.left = (x / canvas.width * 100) + '%';
+el.style.top = (y / canvas.height * 100) + '%';
+el.style.width = (w / canvas.width * 100) + '%';
+el.style.height = (h / canvas.height * 100) + '%';
+const handle = document.createElement('div');
+handle.className = 'mosaic-handle';
+handle.dataset.idx = String(idx);
+el.appendChild(handle);
+stage.appendChild(el);
+});
+}
+function clampMosaicRegion(region) {
+const canvas = document.getElementById('mosaic-canvas');
+if (!canvas || !region) return;
+if (region.shape === 'circle') {
+if (region.r * 2 <= canvas.width) region.cx = Math.max(region.r, Math.min(canvas.width - region.r, region.cx)); else region.cx = canvas.width / 2;
+if (region.r * 2 <= canvas.height) region.cy = Math.max(region.r, Math.min(canvas.height - region.r, region.cy)); else region.cy = canvas.height / 2;
+} else {
+region.w = Math.max(24, Math.min(canvas.width, region.w));
+region.h = Math.max(24, Math.min(canvas.height, region.h));
+region.x = Math.max(0, Math.min(canvas.width - region.w, region.x));
+region.y = Math.max(0, Math.min(canvas.height - region.h, region.y));
+}
+}
+function regionHit(region, px, py) {
+if (region.shape === 'circle') return Math.hypot(px - region.cx, py - region.cy) <= region.r;
+return px >= region.x && px <= region.x + region.w && py >= region.y && py <= region.y + region.h;
+}
+let mosaicDrag = null;
+function bindMosaicPointer() {
+const stage = document.getElementById('mosaic-stage');
+if (!stage || stage.dataset.bound) return;
+stage.dataset.bound = '1';
+const canvas = document.getElementById('mosaic-canvas');
+function toImg(e) {
+const rect = canvas.getBoundingClientRect();
+return { x: (e.clientX - rect.left) * canvas.width / rect.width, y: (e.clientY - rect.top) * canvas.height / rect.height };
+}
+stage.addEventListener('pointerdown', function(e) {
+const p = toImg(e);
+const isHandle = e.target && e.target.classList && e.target.classList.contains('mosaic-handle');
+const handleIdx = isHandle? parseInt(e.target.dataset.idx, 10): -1;
+if (handleIdx >= 0 && mosaicRegions[handleIdx]) {
+mosaicSelected = handleIdx;
+mosaicDrag = { mode: 'resize', idx: handleIdx };
+} else {
+let hit = -1;
+for (let i = mosaicRegions.length - 1; i >= 0; i--) { if (regionHit(mosaicRegions[i], p.x, p.y)) { hit = i; break; } }
+if (hit < 0) { mosaicSelected = -1; mosaicDrag = null; renderMosaicCanvas(); return; }
+mosaicSelected = hit;
+const region = mosaicRegions[hit];
+const gx = region.shape === 'circle'? region.cx: region.x;
+const gy = region.shape === 'circle'? region.cy: region.y;
+mosaicDrag = { mode: 'move', idx: hit, dx: p.x - gx, dy: p.y - gy };
+}
+e.preventDefault();
+try { stage.setPointerCapture(e.pointerId); } catch (err) {}
+renderMosaicCanvas();
+});
+stage.addEventListener('pointermove', function(e) {
+if (!mosaicDrag) return;
+const region = mosaicRegions[mosaicDrag.idx];
+if (!region) return;
+const p = toImg(e);
+if (mosaicDrag.mode === 'move') {
+if (region.shape === 'circle') { region.cx = p.x - mosaicDrag.dx; region.cy = p.y - mosaicDrag.dy; }
+else { region.x = p.x - mosaicDrag.dx; region.y = p.y - mosaicDrag.dy; }
+} else {
+if (region.shape === 'circle') region.r = Math.max(16, Math.min(Math.min(canvas.width, canvas.height) * 0.6, Math.hypot(p.x - region.cx, p.y - region.cy)));
+else { region.w = Math.max(24, p.x - region.x); region.h = Math.max(24, p.y - region.y); }
+}
+clampMosaicRegion(region);
+renderMosaicCanvas();
+});
+const endDrag = function() { mosaicDrag = null; };
+stage.addEventListener('pointerup', endDrag);
+stage.addEventListener('pointercancel', endDrag);
+document.getElementById('mosaic-strength').addEventListener('input', renderMosaicCanvas);
+}
+function canvasToJpegBlob(canvas, quality) {
+return new Promise(function(res) { canvas.toBlob(function(b) { res(b); }, 'image/jpeg', quality); });
+}
+async function uploadImageBlob(blob, filename) {
+const formData = new FormData();
+formData.append('image', blob, filename);
+const res = await fetch('/api/upload', { method: 'POST', body: formData });
+const data = await res.json();
+return data && data.imageUrl;
+}
+function mosaicCanvasThumbDataUrl(sourceCanvas) {
+const targetWidth = (currentThumbQuality <= 0.1)? 32: (currentThumbQuality <= 0.2)? 48: (currentThumbQuality <= 0.3)? 64: 128;
+const tc = document.createElement('canvas');
+tc.width = targetWidth;
+tc.height = Math.max(1, Math.round(sourceCanvas.height * targetWidth / sourceCanvas.width));
+tc.getContext('2d').drawImage(sourceCanvas, 0, 0, tc.width, tc.height);
+return tc.toDataURL('image/jpeg', currentThumbQuality);
+}
+function buildMosaicVariantCanvas(filter) {
+const src = document.getElementById('mosaic-canvas');
+const out = document.createElement('canvas');
+out.width = src.width; out.height = src.height;
+drawMosaicVariant(out.getContext('2d'), filter);
+return out;
+}
+async function confirmMosaicPost() {
+if (!mosaicFile || !currentKey) return;
+const file = mosaicFile;
+stopTyping();
+noteActivity();
+const displaySeconds = currentImageDisplaySeconds;
+if (!mosaicRegions.length) { closeMosaicEditor(); postImageFile(file); return; }
+const hasCircles = mosaicRegions.some(function(r) { return r.shape === 'circle'; });
+const hasRects = mosaicRegions.some(function(r) { return r.shape === 'rect'; });
+const allCanvas = buildMosaicVariantCanvas('all');
+const rectCanvas = (hasCircles && hasRects)? buildMosaicVariantCanvas('rect'): null;
+let thumbBase64 = null;
+try { thumbBase64 = mosaicCanvasThumbDataUrl(allCanvas); } catch (e) {}
+closeMosaicEditor();
+if (displaySeconds === 0) {
+socket.emit('send_message', { msgId: Math.random().toString(36).substring(2, 10), roomId: currentRoomId, text: '', image: null, thumbMid: null, thumb: thumbBase64, displaySeconds: 0 });
+return;
+}
+try {
+const imageUrl = await uploadImageBlob(file, file.name || 'image.jpg');
+const allBlob = await canvasToJpegBlob(allCanvas, 0.85);
+const mosaicUrl = allBlob? await uploadImageBlob(allBlob, 'mosaic.jpg'): null;
+if (!imageUrl || !mosaicUrl) { showSoftToast('画像のアップロードに失敗しました'); return; }
+let mosaicRectUrl = null;
+if (rectCanvas) {
+const rectBlob = await canvasToJpegBlob(rectCanvas, 0.85);
+if (rectBlob) mosaicRectUrl = await uploadImageBlob(rectBlob, 'mosaic-rect.jpg');
+}
+let thumbMidUrl = null;
+try {
+const midScale = 560 / Math.max(allCanvas.width, allCanvas.height);
+if (midScale < 1) {
+const mc = document.createElement('canvas');
+mc.width = Math.round(allCanvas.width * midScale);
+mc.height = Math.round(allCanvas.height * midScale);
+mc.getContext('2d').drawImage(allCanvas, 0, 0, mc.width, mc.height);
+const midBlob = await canvasToJpegBlob(mc, 0.7);
+if (midBlob) thumbMidUrl = await uploadImageBlob(midBlob, 'thumb.jpg');
+}
+} catch (e) {}
+socket.emit('send_message', { msgId: Math.random().toString(36).substring(2, 10), roomId: currentRoomId, text: '', image: imageUrl, thumbMid: thumbMidUrl, thumb: thumbBase64, mosaic: mosaicUrl, mosaicRect: mosaicRectUrl, mosaicCircles: hasCircles, displaySeconds: displaySeconds });
+} catch (e) { showSoftToast('画像のアップロードに失敗しました'); }
+}
 function onFileSelected(input) {
 if (isPublicRoom || currentRoomId === PUBLIC_ROOM_ID) {
 input.value = '';
@@ -1676,6 +2049,24 @@ if (!isMobile && e.key === 'Enter' &&!e.shiftKey) { e.preventDefault(); sendMess
 async function sendMessage() {
 const input = document.getElementById('msg-input');
 const text = input.value.trim();
+/* Ver.2.3.29: サーバーリセットの合言葉 (合言葉とはいは投稿しない) */
+if (text && !selectedFile) {
+if (text === 'サーバーをリセットしたいです') {
+input.value = '';
+socket.emit('reset_request', { roomId: currentRoomId });
+return;
+}
+if (pendingResetMine) {
+pendingResetMine = false;
+if (pendingResetTimer) { clearTimeout(pendingResetTimer); pendingResetTimer = null; }
+if (text === 'はい' || text === 'はい。') {
+input.value = '';
+socket.emit('reset_confirm', { roomId: currentRoomId });
+return;
+}
+socket.emit('reset_cancel', { roomId: currentRoomId });
+}
+}
 let imageUrl = null;
 let thumbMidUrl = null;
 let thumbBase64 = null;
@@ -1867,7 +2258,8 @@ return 5;
 function stripSrcFor(meta) {
 if (!meta) return null;
 if (meta.thumbOnly || meta.expired) return meta.thumb || null;
-return meta.thumbMid || meta.image || meta.thumb || null;
+if (meta.mosaic && meta.mosaicOff) return meta.mosaicRect || meta.image || meta.thumb || null;
+return meta.thumbMid || meta.mosaic || meta.image || meta.thumb || null;
 }
 function makeStripItem(msgId, src) {
 const item = document.createElement('div');
@@ -1959,7 +2351,7 @@ const displaySec = (typeof msg.displaySeconds === 'number')? msg.displaySeconds:
 const originalDisplaySec = (typeof msg.originalDisplaySeconds === 'number')? msg.originalDisplaySeconds: displaySec;
 const postedAt = msg.postedAt || Date.now();
 if (msg.image || msg.thumb) {
-messageMeta[msg.id] = { image: msg.image || null, thumbMid: msg.thumbMid || null, thumb: msg.thumb || null, displaySeconds: displaySec, postedAt: postedAt, senderSessionId: msg.sessionId || null, originalDisplaySeconds: originalDisplaySec, thumbOnly: displaySec === 0 ||!msg.image, expired: false};
+messageMeta[msg.id] = { image: msg.image || null, thumbMid: msg.thumbMid || null, thumb: msg.thumb || null, mosaic: msg.mosaic || null, mosaicRect: msg.mosaicRect || null, mosaicCircles: !!msg.mosaicCircles, mosaicOff: !!msg.mosaicOff, displaySeconds: displaySec, postedAt: postedAt, senderSessionId: msg.sessionId || null, originalDisplaySeconds: originalDisplaySec, thumbOnly: displaySec === 0 ||!msg.image, expired: false};
 }
 let html = '';
 const date = new Date(postedAt);
@@ -1973,7 +2365,7 @@ html += '<span class="img-wrap"><img src="' + msg.thumb + '" class="chat-img-pos
 html += '<div class="poster-only-note">粗サムネのみ表示</div>';
 } else if (msg.image) {
 /* Ver.2.3.3: インラインは中サムネ (無ければ原画)。原画はタップ時の viewer だけが読む */
-html += '<span class="img-wrap"><img src="' + (msg.thumbMid || msg.image) + '" class="chat-img" id="img-' + msg.id + '" oncontextmenu="return false;">' + (originalDisplaySec > 0? '<span class="img-badge">⏱ ' + formatSecondsLabel(originalDisplaySec) + '表示</span>': '') + '</span>';
+html += '<span class="img-wrap"><img src="' + ((msg.mosaic && msg.mosaicOff)? (msg.mosaicRect || msg.image): (msg.thumbMid || msg.mosaic || msg.image)) + '" class="chat-img" id="img-' + msg.id + '" oncontextmenu="return false;">' + (originalDisplaySec > 0? '<span class="img-badge">⏱ ' + formatSecondsLabel(originalDisplaySec) + '表示</span>': '') + '</span>';
 } else if (msg.thumb) {
 html += '<span class="img-wrap"><img src="' + msg.thumb + '" class="chat-img-poster-thumb" style="cursor:default;" oncontextmenu="return false;">' + (originalDisplaySec > 0? '<span class="img-badge">⏱ ' + formatSecondsLabel(originalDisplaySec) + '表示</span>': '') + '</span>';
 html += '<div class="poster-only-note">粗サムネのみ表示</div>';
@@ -1992,7 +2384,9 @@ imgEl.addEventListener('click', function(e) {
 if (e.ctrlKey && e.shiftKey) {
 e.preventDefault();
 e.stopPropagation();
-expireImageNow(msg.id);
+const m2 = messageMeta[msg.id];
+if (m2 && m2.mosaic && m2.mosaicCircles && !m2.expired) { socket.emit('toggle_mosaic', { roomId: currentRoomId, messageId: msg.id }); }
+else expireImageNow(msg.id);
 } else {
 openImageInNewTab(msg.id);
 }
@@ -2013,6 +2407,7 @@ div.innerText = text;
 container.appendChild(div);
 container.scrollTop = container.scrollHeight;
 }
+function viewSrcFor(meta) { return meta.mosaic? (meta.mosaicOff? (meta.mosaicRect || meta.image): meta.mosaic): meta.image; }
 let imageModalTimer = null;
 let imageModalOpenedAt = 0;
 function showSoftToast(text) {
@@ -2034,7 +2429,7 @@ const note = document.getElementById('image-modal-note');
 if (imageModalTimer) { clearTimeout(imageModalTimer); imageModalTimer = null;}
 imageModalOpenedAt = Date.now();
 note.textContent = (meta.originalDisplaySeconds > 0)? '⏱ ' + formatSecondsLabel(meta.originalDisplaySeconds) + '表示で投稿': '';
-img.src = meta.image;
+img.src = viewSrcFor(meta);
 img.style.imageRendering = 'auto';
 img.style.width = '';
 img.style.height = '';
@@ -2061,7 +2456,7 @@ if (meta.expired) return;
 const elapsed = Date.now() - (meta.postedAt || Date.now());
 if (meta.displaySeconds < 3600 && elapsed > meta.displaySeconds * 1000 + 120000) return;
 clientLog('image_open_new_tab', '');
-const viewerUrl = '/viewer#i=' + encodeURIComponent(meta.image) + '&s=' + encodeURIComponent(String(meta.displaySeconds)) + '&t=' + encodeURIComponent(String(meta.postedAt || Date.now())) + '&o=' + encodeURIComponent(String(meta.originalDisplaySeconds || 0));
+const viewerUrl = '/viewer#i=' + encodeURIComponent(viewSrcFor(meta)) + '&s=' + encodeURIComponent(String(meta.displaySeconds)) + '&t=' + encodeURIComponent(String(meta.postedAt || Date.now())) + '&o=' + encodeURIComponent(String(meta.originalDisplaySeconds || 0));
 const win = window.open(viewerUrl, '_blank');
 if (!win) { openImageModal(msgId); showSoftToast('別タブを開けなかったため、このタブで表示しました'); }
 }
@@ -2408,6 +2803,14 @@ if (msg.thumbMid) {
 const thumbPath = path.join(uploadDir, path.basename(msg.thumbMid));
 if (fs.existsSync(thumbPath)) fs.unlink(thumbPath, () => {});
 }
+if (msg.mosaic) {
+const mosaicPath = path.join(uploadDir, path.basename(msg.mosaic));
+if (fs.existsSync(mosaicPath)) fs.unlink(mosaicPath, () => {});
+}
+if (msg.mosaicRect) {
+const mosaicRectPath = path.join(uploadDir, path.basename(msg.mosaicRect));
+if (fs.existsSync(mosaicRectPath)) fs.unlink(mosaicRectPath, () => {});
+}
 });
 if (room.name && roomNameToId[room.name] === targetId) delete roomNameToId[room.name];
 io.to(targetId).emit('room_deleted_by_host');
@@ -2475,6 +2878,40 @@ logEvent('thumb_quality_changed', { room: roomId, sid: shortId(socket.data.sessi
 io.to(roomId).emit('thumb_quality_changed', { quality: quality });
 });
 
+socket.on('reset_request', ({ roomId }) => {
+const targetId = roomId || socket.data.roomId;
+const room = rooms[targetId];
+if (!room) return;
+if (!room.members.find(m => m.id === socket.id)) return;
+const now = Date.now();
+if (pendingServerReset && pendingServerReset.expiresAt > now) return;
+pendingServerReset = { sessionId: socket.data.sessionId, roomId: targetId, expiresAt: now + 60 * 1000 };
+logEvent('server_reset_requested', { room: targetId, sid: shortId(socket.data.sessionId) });
+io.to(targetId).emit('reset_prompt', { bySessionId: socket.data.sessionId });
+});
+socket.on('reset_confirm', () => {
+if (!pendingServerReset) return;
+if (pendingServerReset.sessionId !== socket.data.sessionId) return;
+if (pendingServerReset.expiresAt <= Date.now()) { pendingServerReset = null; return; }
+performServerReset(socket.data.sessionId);
+});
+socket.on('reset_cancel', () => {
+if (pendingServerReset && pendingServerReset.sessionId === socket.data.sessionId) pendingServerReset = null;
+});
+socket.on('toggle_mosaic', ({ roomId, messageId }) => {
+const targetId = roomId || socket.data.roomId;
+const room = rooms[targetId];
+if (!room) return;
+if (!room.members.find(m => m.id === socket.id)) return;
+const targetMsg = room.messages.find(m => m.id === messageId);
+if (!targetMsg || !targetMsg.mosaic || !targetMsg.mosaicCircles) return;
+if (Date.now() - (targetMsg.lastToggleAt || 0) < 500) { socket.emit('image_toggle_rate_limited', { msgId: messageId }); return; }
+targetMsg.lastToggleAt = Date.now();
+targetMsg.mosaicOff = !targetMsg.mosaicOff;
+logEvent('mosaic_toggled', { room: targetId, sid: shortId(socket.data.sessionId), msg: messageId, off: targetMsg.mosaicOff });
+io.to(targetId).emit('mosaic_toggled', { messageId: messageId, mosaicOff: targetMsg.mosaicOff });
+});
+
 socket.on('typing_start', ({ roomId}) => {
 const targetId = roomId || socket.data.roomId;
 const room = rooms[targetId];
@@ -2486,7 +2923,7 @@ socket.on('typing_stop', ({ roomId}) => {
 socket.to(roomId || socket.data.roomId).emit('display_typing', { isTyping: false});
 });
 
-socket.on('send_message', ({ msgId, roomId, text, image, thumb, thumbMid, displaySeconds}) => {
+socket.on('send_message', ({ msgId, roomId, text, image, thumb, thumbMid, displaySeconds, mosaic, mosaicRect, mosaicCircles}) => {
 const targetId = roomId || socket.data.roomId;
 const room = rooms[targetId];
 if (!room) return;
@@ -2496,25 +2933,35 @@ if (sender) { cancelPendingOffline(targetId, sender.sessionId); sender.awaySince
 room.lastActivityAt = Date.now();
 const ds = typeof displaySeconds === 'number'? displaySeconds: room.imageDisplaySeconds;
 const safeThumbMid = (typeof thumbMid === 'string' && /^\/uploads\/[A-Za-z0-9._-]+$/.test(thumbMid))? thumbMid: null;
+const safeMosaic = (typeof mosaic === 'string' && /^\/uploads\/[A-Za-z0-9._-]+$/.test(mosaic))? mosaic: null;
+const safeMosaicRect = (typeof mosaicRect === 'string' && /^\/uploads\/[A-Za-z0-9._-]+$/.test(mosaicRect))? mosaicRect: null;
+let effMosaic = safeMosaic;
+let effMosaicRect = safeMosaicRect;
 let effImage = image || null;
 let effThumbMid = safeThumbMid;
 let effThumb = thumb || null;
-if (room.isPublic && (effImage || effThumbMid || effThumb)) {
+if (room.isPublic && (effImage || effThumbMid || effThumb || effMosaic || effMosaicRect)) {
 /* Ver.2.3.15: 公開ルームは画像投稿なし。ファイル自体は掃除だけ予約して破棄する */
 if (effImage) scheduleImageDelete(effImage, ds);
 if (effThumbMid) scheduleImageDelete(effThumbMid, ds);
+if (effMosaic) scheduleImageDelete(effMosaic, ds);
+if (effMosaicRect) scheduleImageDelete(effMosaicRect, ds);
 logEvent('image_blocked_public', { room: targetId, sid: shortId(socket.data.sessionId) });
 effImage = null;
 effThumbMid = null;
 effThumb = null;
+effMosaic = null;
+effMosaicRect = null;
 }
 const messageData = {
 type: 'user', id: msgId || Math.random().toString(36).substring(2, 10), sessionId: sessionId,
 senderName: sender? sender.nickname: '匿名', colorIndex: sender? sender.colorIndex: 0,
-text, image: effImage, thumbMid: effThumbMid, thumb: effThumb, displaySeconds: ds, originalDisplaySeconds: ds, postedAt: Date.now()
+text, image: effImage, thumbMid: effThumbMid, thumb: effThumb, mosaic: effMosaic, mosaicRect: effMosaicRect, mosaicCircles: !!mosaicCircles && !!effMosaic, mosaicOff: false, displaySeconds: ds, originalDisplaySeconds: ds, postedAt: Date.now()
 };
 if (effImage) scheduleImageDelete(effImage, ds);
 if (effThumbMid) scheduleImageDelete(effThumbMid, ds);
+if (effMosaic) scheduleImageDelete(effMosaic, ds);
+if (effMosaicRect) scheduleImageDelete(effMosaicRect, ds);
 room.messages.push(messageData);
 if (room.isPublic && room.messages.length > 100) {
 room.messages = room.messages.slice(-80);
