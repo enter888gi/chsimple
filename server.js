@@ -565,7 +565,7 @@ flex-shrink: 0;
 <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
 <span class="room-name" id="header-room-name">SimpleChatee</span>
 <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.31</span>
+<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.32</span>
 </div>
 <div class="header-members" id="header-room-id-container" style="display:none;">
 <div class="member-block">
@@ -686,7 +686,7 @@ flex-shrink: 0;
 <textarea id="msg-input" placeholder="メッセージを入力..." oninput="handleTyping()" onkeydown="onKeyDown(event)"></textarea>
 <button type="button" onclick="sendMessage()">送<br>信</button>
 </div>
-<div class="security-disclaimer">🌀モザイク投稿は場所と強さを選んで投稿ができます。<br>📸通常投稿は指定の時間が過ぎたら自動モザイクが入ります。<br>🔒 チャット内容はE2E暗号化により管理者も閲覧不可です。<br>🔒画像は表示時間経過後にサーバーからも安全に削除されます。</div>
+<div class="security-disclaimer">🌀モザイク投稿は場所と強さを選んで投稿可能です<br>📸通常投稿は指定時間が経過で自動モザイクが入ります<br>🔒 チャット内容はE2E暗号化で管理者も閲覧不可です<br>🔒画像は表示時間経過後にサーバーからも削除されます</div>
 </div>
 </div>
 </div>
@@ -2591,6 +2591,7 @@ res.send(VIEWER_HTML);
 app.get('/:roomId([a-z0-9]{6})', (req, res) => {
 res.send(HTML_CONTENT);
 });
+
 
 function safeCallback(callback, payload) {
 if (typeof callback === 'function') {
