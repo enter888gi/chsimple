@@ -521,7 +521,8 @@ flex-shrink: 0;
 <canvas id="mosaic-canvas"></canvas>
 </div>
 <div id="mosaic-controls">
-<div class="mosaic-strength-row"><span>モザイクの強さ</span><input type="range" id="mosaic-strength" min="8" max="64" step="2" value="26"></div>
+<div class="mosaic-strength-row"><span>丸の強さ</span><input type="range" id="mosaic-strength-circle" min="0" max="19" step="1" value="11"></div>
+<div class="mosaic-strength-row"><span>四角の強さ</span><input type="range" id="mosaic-strength-rect" min="0" max="19" step="1" value="11"></div>
 <div class="mosaic-add-row">
 <button type="button" class="mosaic-sub-btn" onclick="addMosaicRegion('circle')">丸を追加</button>
 <button type="button" class="mosaic-sub-btn" onclick="addMosaicRegion('rect')">四角を追加</button>
@@ -529,7 +530,7 @@ flex-shrink: 0;
 </div>
 <div class="mosaic-btn-row">
 <button type="button" class="mosaic-sub-btn" onclick="resetMosaicEditor()">やり直し</button>
-<button type="button" class="mosaic-ok-btn" onclick="confirmMosaicPost()">決定</button>
+<button type="button" class="mosaic-ok-btn" onclick="confirmMosaicPost()">投稿</button>
 </div>
 </div>
 </div>
@@ -564,7 +565,7 @@ flex-shrink: 0;
 <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
 <span class="room-name" id="header-room-name">SimpleChatee</span>
 <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.30</span>
+<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.31</span>
 </div>
 <div class="header-members" id="header-room-id-container" style="display:none;">
 <div class="member-block">
@@ -685,7 +686,7 @@ flex-shrink: 0;
 <textarea id="msg-input" placeholder="メッセージを入力..." oninput="handleTyping()" onkeydown="onKeyDown(event)"></textarea>
 <button type="button" onclick="sendMessage()">送<br>信</button>
 </div>
-<div class="security-disclaimer">🕒指定の時間を過ぎたら自動でモザイクが入ります。<br>🔒 チャット内容はE2E暗号化により管理者も閲覧不可です。<br>🔒画像は表示時間経過後にサーバーからも安全に削除されます。</div>
+<div class="security-disclaimer">🌀モザイク投稿は場所と強さを選んで投稿ができます。<br>📸通常投稿は指定の時間が過ぎたら自動モザイクが入ります。<br>🔒 チャット内容はE2E暗号化により管理者も閲覧不可です。<br>🔒画像は表示時間経過後にサーバーからも安全に削除されます。</div>
 </div>
 </div>
 </div>
@@ -1780,7 +1781,8 @@ mosaicBase = document.createElement('canvas');
 mosaicBase.width = canvas.width;
 mosaicBase.height = canvas.height;
 mosaicBase.getContext('2d').drawImage(mosaicImg, 0, 0, canvas.width, canvas.height);
-document.getElementById('mosaic-strength').value = '26';
+document.getElementById('mosaic-strength-circle').value = '11';
+document.getElementById('mosaic-strength-rect').value = '11';
 resetMosaicRegions();
 document.getElementById('mosaic-modal').classList.add('active');
 bindMosaicPointer();
@@ -1795,7 +1797,8 @@ mosaicRegions = [defaultCircleRegion()];
 mosaicSelected = 0;
 }
 function resetMosaicEditor() {
-document.getElementById('mosaic-strength').value = '26';
+document.getElementById('mosaic-strength-circle').value = '11';
+document.getElementById('mosaic-strength-rect').value = '11';
 resetMosaicRegions();
 renderMosaicCanvas();
 }
@@ -1828,7 +1831,14 @@ mosaicImg = null;
 mosaicRegions = [];
 mosaicSelected = -1;
 }
-function mosaicBlockSize() { return parseInt(document.getElementById('mosaic-strength').value, 10) || 26; }
+/* Ver.2.3.31: 強さは丸/四角で別バー。段階表は弱側を細かくし、最弱 (0) はモザイクなし、
+   最強でも従来の中央あたりの粗さに抑える */
+const MOSAIC_BLOCK_STEPS = [0, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 19, 22, 25, 28, 31, 34, 37, 40];
+function mosaicBlockFor(shape) {
+const el = document.getElementById(shape === 'rect'? 'mosaic-strength-rect': 'mosaic-strength-circle');
+const idx = el? (parseInt(el.value, 10) || 0): 0;
+return MOSAIC_BLOCK_STEPS[Math.max(0, Math.min(MOSAIC_BLOCK_STEPS.length - 1, idx))];
+}
 function applyMosaicRegion(ctx, region, block) {
 let x, y, w, h;
 if (region.shape === 'circle') { x = region.cx - region.r; y = region.cy - region.r; w = region.r * 2; h = region.r * 2; }
@@ -1849,10 +1859,10 @@ ctx.restore();
 }
 function drawMosaicVariant(ctx, filter) {
 ctx.drawImage(mosaicBase, 0, 0);
-const block = mosaicBlockSize();
 mosaicRegions.forEach(function(region) {
 if (filter === 'rect' && region.shape !== 'rect') return;
-applyMosaicRegion(ctx, region, block);
+const block = mosaicBlockFor(region.shape);
+if (block > 0) applyMosaicRegion(ctx, region, block);
 });
 }
 function renderMosaicCanvas() {
@@ -1950,7 +1960,8 @@ renderMosaicCanvas();
 const endDrag = function() { mosaicDrag = null; };
 stage.addEventListener('pointerup', endDrag);
 stage.addEventListener('pointercancel', endDrag);
-document.getElementById('mosaic-strength').addEventListener('input', renderMosaicCanvas);
+document.getElementById('mosaic-strength-circle').addEventListener('input', renderMosaicCanvas);
+document.getElementById('mosaic-strength-rect').addEventListener('input', renderMosaicCanvas);
 }
 function canvasToJpegBlob(canvas, quality) {
 return new Promise(function(res) { canvas.toBlob(function(b) { res(b); }, 'image/jpeg', quality); });
