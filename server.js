@@ -466,6 +466,17 @@ flex-shrink: 0;
 .mosaic-add-row button { flex: 1; padding: 9px; border: none; border-radius: 10px; font-size: 0.85rem; cursor: pointer;}
 #mosaic-controls { width: min(94vw, 520px); display: flex; flex-direction: column; gap: 10px;}
 .mosaic-strength-row { display: flex; align-items: center; gap: 10px; color: #fff; font-size: 0.85rem;}
+.mosaic-mode-row { display: flex; gap: 8px;}
+.mosaic-mode-btn { flex: 1; background: #334155; color: #f8fafc; border: 1px solid #475569; padding: 7px 0; border-radius: 10px; cursor: pointer; font-size: 0.85rem; margin: 0; width: auto;}
+.mosaic-mode-btn.active { background: #38bdf8; color: #082f49; border-color: #38bdf8; font-weight: 700;}
+.chat-top-row { display: flex; justify-content: flex-start; padding: 4px 2px 0;}
+.img-help-btn { background: #334155; color: #e2e8f0; border: 1px solid #475569; padding: 3px 10px; border-radius: 12px; cursor: pointer; font-size: 0.7rem; line-height: 1.3; width: auto; margin: 0;}
+#img-help-modal { position: fixed; inset: 0; background: rgba(10, 10, 14, 0.85); z-index: 450; display: none; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box;}
+.img-help-card { position: relative; background: #1e293b; color: #f1f5f9; border-radius: 14px; padding: 20px 18px; max-width: 520px; width: 100%; max-height: 85vh; overflow-y: auto; box-sizing: border-box;}
+.img-help-close { position: absolute; top: 8px; right: 8px; background: #334155; color: #fff; border: none; width: 34px; height: 34px; border-radius: 50%; font-size: 1rem; cursor: pointer; margin: 0;}
+.img-help-title { font-size: 1.05rem; font-weight: 700; margin-bottom: 6px;}
+.img-help-head { font-size: 0.92rem; font-weight: 700; color: #7dd3fc; margin: 12px 0 4px;}
+.img-help-text { font-size: 0.85rem; line-height: 1.6; margin: 0;}
 .mosaic-strength-row input[type="range"] { flex: 1;}
 .mosaic-btn-row { display: flex; gap: 10px;}
 .mosaic-btn-row button { flex: 1; padding: 12px; border: none; border-radius: 10px; font-size: 1rem; cursor: pointer;}
@@ -521,6 +532,7 @@ flex-shrink: 0;
 <canvas id="mosaic-canvas"></canvas>
 </div>
 <div id="mosaic-controls">
+<div class="mosaic-mode-row"><button type="button" class="mosaic-mode-btn active" id="mosaic-mode-mosaic" onclick="setMosaicEffect('mosaic')">モザイク</button><button type="button" class="mosaic-mode-btn" id="mosaic-mode-blur" onclick="setMosaicEffect('blur')">ぼかし</button></div>
 <div class="mosaic-strength-row"><span>丸の強さ</span><input type="range" id="mosaic-strength-circle" min="0" max="19" step="1" value="11"></div>
 <div class="mosaic-strength-row"><span>四角の強さ</span><input type="range" id="mosaic-strength-rect" min="0" max="19" step="1" value="11"></div>
 <div class="mosaic-add-row">
@@ -565,7 +577,7 @@ flex-shrink: 0;
 <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
 <span class="room-name" id="header-room-name">SimpleChatee</span>
 <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.32</span>
+<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.34</span>
 </div>
 <div class="header-members" id="header-room-id-container" style="display:none;">
 <div class="member-block">
@@ -648,7 +660,18 @@ flex-shrink: 0;
 <button type="button" onclick="joinRoom()">入室する</button>
 <button type="button" class="btn-secondary" style="margin-top: 10px;" onclick="goHome()">トップに戻る</button>
 </div>
+<div id="img-help-modal">
+<div class="img-help-card">
+<button type="button" class="img-help-close" onclick="closeImageHelp()">✕</button>
+<div class="img-help-title">画像投稿の使い方</div>
+<div class="img-help-head">写真投稿</div>
+<p class="img-help-text">・指定した時間だけ画像がそのまま表示されます。<br>時間内ならサムネクリックで大きな画像も閲覧可能。<br>指定時間になると粗モザイク画像になりクリックも出来なくなり元画像はサーバーからも完全に削除されます。</p>
+<div class="img-help-head">モザイク投稿</div>
+<p class="img-help-text">範囲指定をした箇所にモザイクの強さを選んで投稿ができます。（複数箇所可能）<br>指定時間になると粗モザイク画像になりクリックも出来なくなり元画像はサーバーからも完全に削除されます。</p>
+</div>
+</div>
 <div id="view-chat" class="view">
+<div class="chat-top-row"><button type="button" class="img-help-btn" id="img-help-btn" onclick="openImageHelp()">画像投稿の使い方</button></div>
 <div id="recent-strip"></div>
 <div id="pull-indicator" class="pull-indicator"><span class="spinner"></span></div>
 <div id="chat-messages"></div>
@@ -1586,6 +1609,8 @@ const fileBtn = document.querySelector('.file-btn');
 if (fileBtn) fileBtn.style.display = (isPublicRoom || roomId === PUBLIC_ROOM_ID)? 'none': 'flex';
 const mosaicBtn = document.getElementById('mosaic-btn');
 if (mosaicBtn) mosaicBtn.style.display = (isPublicRoom || roomId === PUBLIC_ROOM_ID)? 'none': 'flex';
+const imgHelpBtn = document.getElementById('img-help-btn');
+if (imgHelpBtn) imgHelpBtn.style.display = (isPublicRoom || roomId === PUBLIC_ROOM_ID)? 'none': 'inline-block';
 const sel = document.getElementById('image-display-select');
 if (sel) sel.value = String(currentImageDisplaySeconds);
 document.getElementById('btn-delete-room').style.display = (isHost &&!isPublicRoom && roomId!== PUBLIC_ROOM_ID)? 'flex': 'none';
@@ -1685,6 +1710,9 @@ const panel = document.getElementById('qr-panel');
 if (panel) panel.style.display = 'none';
 }
 
+/* Ver.2.3.34: 画像投稿の使い方モーダル */
+function openImageHelp() { document.getElementById('img-help-modal').style.display = 'flex'; }
+function closeImageHelp() { document.getElementById('img-help-modal').style.display = 'none'; }
 function changeImageDisplayTime() {
 const seconds = parseInt(document.getElementById('image-display-select').value, 10);
 if (isNaN(seconds) || ![0, 1, 2, 3, 5, 10, 3600].includes(seconds)) return;
@@ -1758,6 +1786,13 @@ let mosaicFile = null;
 let mosaicImg = null;
 let mosaicBase = null;
 let mosaicRegions = [];
+let mosaicEffect = 'mosaic';
+function setMosaicEffect(mode) {
+mosaicEffect = (mode === 'blur')? 'blur': 'mosaic';
+document.getElementById('mosaic-mode-mosaic').classList.toggle('active', mosaicEffect === 'mosaic');
+document.getElementById('mosaic-mode-blur').classList.toggle('active', mosaicEffect === 'blur');
+renderMosaicCanvas();
+}
 let mosaicSelected = -1;
 function onMosaicFileSelected(input) {
 const file = input.files && input.files[0];
@@ -1783,6 +1818,9 @@ mosaicBase.height = canvas.height;
 mosaicBase.getContext('2d').drawImage(mosaicImg, 0, 0, canvas.width, canvas.height);
 document.getElementById('mosaic-strength-circle').value = '11';
 document.getElementById('mosaic-strength-rect').value = '11';
+mosaicEffect = 'mosaic';
+document.getElementById('mosaic-mode-mosaic').classList.add('active');
+document.getElementById('mosaic-mode-blur').classList.remove('active');
 resetMosaicRegions();
 document.getElementById('mosaic-modal').classList.add('active');
 bindMosaicPointer();
@@ -1799,6 +1837,9 @@ mosaicSelected = 0;
 function resetMosaicEditor() {
 document.getElementById('mosaic-strength-circle').value = '11';
 document.getElementById('mosaic-strength-rect').value = '11';
+mosaicEffect = 'mosaic';
+document.getElementById('mosaic-mode-mosaic').classList.add('active');
+document.getElementById('mosaic-mode-blur').classList.remove('active');
 resetMosaicRegions();
 renderMosaicCanvas();
 }
@@ -1843,6 +1884,30 @@ function applyMosaicRegion(ctx, region, block) {
 let x, y, w, h;
 if (region.shape === 'circle') { x = region.cx - region.r; y = region.cy - region.r; w = region.r * 2; h = region.r * 2; }
 else { x = region.x; y = region.y; w = region.w; h = region.h; }
+if (mosaicEffect === 'blur') {
+/* Ver.2.3.33: ぼかしは滑らかな縮小を2段かけてから戻す (ctx.filter非依存で全端末対応) */
+const tw = Math.max(1, Math.round(w / block));
+const th = Math.max(1, Math.round(h / block));
+const mid = document.createElement('canvas');
+mid.width = Math.max(tw, Math.round(w / 2)); mid.height = Math.max(th, Math.round(h / 2));
+const mctx = mid.getContext('2d');
+mctx.imageSmoothingEnabled = true; mctx.imageSmoothingQuality = 'high';
+mctx.drawImage(mosaicBase, x, y, w, h, 0, 0, mid.width, mid.height);
+const tiny = document.createElement('canvas');
+tiny.width = tw; tiny.height = th;
+const tctx = tiny.getContext('2d');
+tctx.imageSmoothingEnabled = true; tctx.imageSmoothingQuality = 'high';
+tctx.drawImage(mid, 0, 0, tw, th);
+ctx.save();
+ctx.beginPath();
+if (region.shape === 'circle') ctx.arc(region.cx, region.cy, region.r, 0, Math.PI * 2);
+else ctx.rect(region.x, region.y, region.w, region.h);
+ctx.clip();
+ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+ctx.drawImage(tiny, 0, 0, tw, th, x, y, w, h);
+ctx.restore();
+return;
+}
 const sw = Math.max(1, Math.round(w / block));
 const sh = Math.max(1, Math.round(h / block));
 const small = document.createElement('canvas');
