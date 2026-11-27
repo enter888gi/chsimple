@@ -581,7 +581,7 @@ flex-shrink: 0;
 <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
 <span class="room-name" id="header-room-name">SimpleChatee</span>
 <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.36</span>
+<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.37</span>
 </div>
 <div class="header-members" id="header-room-id-container" style="display:none;">
 <div class="member-block">
@@ -1490,6 +1490,7 @@ return alert('サーバーに接続されていません。ページを再読み
 if (!userSessionId) {
 try { userSessionId = getOrCreateSessionId();} catch (e) {
 userSessionId = generateSessionId();
+}
 }
 try {
 currentKey = generateKey();
