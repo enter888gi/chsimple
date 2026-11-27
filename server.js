@@ -497,6 +497,10 @@ flex-shrink: 0;
 .display-time-row select { width: auto; padding: 2px 6px; margin: 0; font-size: 0.72rem; border-radius: 8px;}
 .input-row { display: flex; gap: 8px; align-items: flex-end;}
 .file-btn { background: #475569; color: white; padding: 12px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; margin: 0; width: 46px; height: 46px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;}
+.post-mode-toggle { display: flex; background: #1e293b; border: 1px solid #475569; border-radius: 999px; padding: 2px; gap: 2px; flex-shrink: 0; align-self: center;}
+.post-mode-btn { background: transparent; color: #94a3b8; border: none; padding: 5px 9px; border-radius: 999px; cursor: pointer; font-size: 0.68rem; line-height: 1.2; width: auto; margin: 0; white-space: nowrap;}
+.post-mode-btn.active { background: #38bdf8; color: #082f49; font-weight: 700;}
+#file-pick-btn { border: none;}
 .input-row textarea { margin: 0; min-height: 46px;}
 .input-row button { margin: 0; width: 52px; height: 46px; padding: 0; flex-shrink: 0; line-height: 1.15;}
 .security-disclaimer { font-size: 0.92rem; color: var(--text-muted); line-height: 1.45; margin-top: 2px; padding: 0 2px;}
@@ -577,7 +581,7 @@ flex-shrink: 0;
 <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
 <span class="room-name" id="header-room-name">SimpleChatee</span>
 <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.34</span>
+<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.36</span>
 </div>
 <div class="header-members" id="header-room-id-container" style="display:none;">
 <div class="member-block">
@@ -667,7 +671,7 @@ flex-shrink: 0;
 <div class="img-help-head">写真投稿</div>
 <p class="img-help-text">・指定した時間だけ画像がそのまま表示されます。<br>時間内ならサムネクリックで大きな画像も閲覧可能。<br>指定時間になると粗モザイク画像になりクリックも出来なくなり元画像はサーバーからも完全に削除されます。</p>
 <div class="img-help-head">モザイク投稿</div>
-<p class="img-help-text">範囲指定をした箇所にモザイクの強さを選んで投稿ができます。（複数箇所可能）<br>指定時間になると粗モザイク画像になりクリックも出来なくなり元画像はサーバーからも完全に削除されます。</p>
+<p class="img-help-text">範囲指定をした箇所にモザイクの強さを選んで投稿ができます。（複数箇所可能）<br>編集画面の上で「モザイク」「ぼかし」を切り替えられます。ぼかしは顔の特徴が溶けて消えるので、変顔に見えにくくなります。<br>左下のスイッチで「写真投稿」「モザイク投稿」を切り替えます。モザイク投稿にする時は、スイッチを切り替えてから画像を選んでください。<br>指定時間になると粗モザイク画像になりクリックも出来なくなり元画像はサーバーからも完全に削除されます。</p>
 </div>
 </div>
 <div id="view-chat" class="view">
@@ -704,8 +708,10 @@ flex-shrink: 0;
 </select>
 </div>
 <div class="input-row">
-<label class="file-btn">📷<input type="file" id="file-input" accept="image/*" style="display:none;" onchange="onFileSelected(this)"></label>
-<label class="file-btn" id="mosaic-btn" title="モザイク投稿">🌀<input type="file" id="mosaic-file-input" accept="image/*" style="display:none;" onchange="onMosaicFileSelected(this)"></label>
+<div class="post-mode-toggle" id="post-mode-toggle"><button type="button" class="post-mode-btn active" id="post-mode-photo" onclick="setPostMode('photo')">写真投稿</button><button type="button" class="post-mode-btn" id="post-mode-mosaic" onclick="setPostMode('mosaic')">モザイク投稿</button></div>
+<button type="button" class="file-btn" id="file-pick-btn" onclick="pickImageFile()">📷</button>
+<input type="file" id="file-input" accept="image/*" style="display:none;" onchange="onFileSelected(this)">
+<input type="file" id="mosaic-file-input" accept="image/*" style="display:none;" onchange="onMosaicFileSelected(this)">
 <textarea id="msg-input" placeholder="メッセージを入力..." oninput="handleTyping()" onkeydown="onKeyDown(event)"></textarea>
 <button type="button" onclick="sendMessage()">送<br>信</button>
 </div>
@@ -749,6 +755,19 @@ let currentMaxMembers = 3;
 let currentImageDisplaySeconds = 5;
 let currentThumbQuality = 0.8;
 let pendingResetMine = false;
+/* Ver.2.3.35: 投稿モード (写真/モザイク) のトグル */
+let postMode = 'photo';
+function setPostMode(mode) {
+postMode = (mode === 'mosaic')? 'mosaic': 'photo';
+const pb = document.getElementById('post-mode-photo');
+const mb = document.getElementById('post-mode-mosaic');
+if (pb) pb.classList.toggle('active', postMode === 'photo');
+if (mb) mb.classList.toggle('active', postMode === 'mosaic');
+}
+function pickImageFile() {
+const input = document.getElementById(postMode === 'mosaic'? 'mosaic-file-input': 'file-input');
+if (input) input.click();
+}
 let pendingResetTimer = null;
 let keepAliveTimer = null;
 let lastChatActivityAt = Date.now();
@@ -1472,7 +1491,6 @@ if (!userSessionId) {
 try { userSessionId = getOrCreateSessionId();} catch (e) {
 userSessionId = generateSessionId();
 }
-}
 try {
 currentKey = generateKey();
 } catch (e) {
@@ -1602,13 +1620,14 @@ if (qsel0) { qsel0.value = String(currentThumbQuality); qsel0.style.display = is
 if (qlabel0) qlabel0.style.display = isHost? '': 'none';
 noteActivity();
 setRoomTitle(currentRoomName);
+setPostMode('photo');
 document.getElementById('header-copy-btn').style.display = (isPublicRoom || roomId === PUBLIC_ROOM_ID)? 'none': 'inline-flex';
 document.getElementById('header-room-id-container').style.display = 'flex';
 document.getElementById('display-time-control').style.display = (isPublicRoom || roomId === PUBLIC_ROOM_ID)? 'none': 'flex';
 const fileBtn = document.querySelector('.file-btn');
 if (fileBtn) fileBtn.style.display = (isPublicRoom || roomId === PUBLIC_ROOM_ID)? 'none': 'flex';
-const mosaicBtn = document.getElementById('mosaic-btn');
-if (mosaicBtn) mosaicBtn.style.display = (isPublicRoom || roomId === PUBLIC_ROOM_ID)? 'none': 'flex';
+const postModeToggle = document.getElementById('post-mode-toggle');
+if (postModeToggle) postModeToggle.style.display = (isPublicRoom || roomId === PUBLIC_ROOM_ID)? 'none': 'flex';
 const imgHelpBtn = document.getElementById('img-help-btn');
 if (imgHelpBtn) imgHelpBtn.style.display = (isPublicRoom || roomId === PUBLIC_ROOM_ID)? 'none': 'inline-block';
 const sel = document.getElementById('image-display-select');
@@ -1638,7 +1657,11 @@ e.preventDefault();
 chatView.classList.remove('drag-over');
 if (!currentRoomId) return;
 const files = Array.prototype.slice.call((e.dataTransfer && e.dataTransfer.files) || []).filter(function(f) { return f.type && f.type.indexOf('image/') === 0; });
+if (postMode === 'mosaic') {
+if (files.length) openMosaicEditorWithFile(files[0]);
+} else {
 files.forEach(function(f) { postImageFile(f); });
+}
 });
 }
 showView('view-chat');
@@ -1798,8 +1821,12 @@ function onMosaicFileSelected(input) {
 const file = input.files && input.files[0];
 input.value = '';
 if (!file) return;
-if (isPublicRoom || currentRoomId === PUBLIC_ROOM_ID) { showSoftToast('公開ルームでは画像を投稿できません'); return; }
+openMosaicEditorWithFile(file);
+}
+/* Ver.2.3.35: ファイル選択/ドロップ共通でモザイク編集画面を開く */
+function openMosaicEditorWithFile(file) {
 if (!currentKey) { showSoftToast('暗号化鍵がありません'); return; }
+if (isPublicRoom || currentRoomId === PUBLIC_ROOM_ID) { showSoftToast('公開ルームでは画像を投稿できません'); return; }
 mosaicFile = file;
 const url = URL.createObjectURL(file);
 const img = new Image();
