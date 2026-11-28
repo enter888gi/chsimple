@@ -313,29 +313,31 @@ const HTML_CONTENT = `<!DOCTYPE html>
 --text-color: #f8fafc;
 --text-muted: #94a3b8;
 --border-color: #334155;
+--radius-s: 6px;
+--radius-m: 10px;
+--radius-l: 14px;
 }
-* { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;}
 html, body { height: 100%;}
 body { background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 0; overflow: hidden;}
 .container { position: fixed; top: 0; left: 0; right: 0; margin: 0 auto; width: 100%; max-width: 560px; background: var(--card-bg); overflow: hidden; display: flex; flex-direction: column; height: 100%; min-height: 0;}
 .header { padding: 6px 8px 6px; border-bottom: 1px solid var(--border-color); background: #111827; display: flex; flex-direction: column; gap: 4px; flex-shrink: 0;}
 .header-top { display: flex; align-items: center; gap: 6px; min-width: 0;}
-.home-btn { width: 28px; height: 28px; margin: 0; padding: 0; border: none; border-radius: 6px; background: transparent; color: var(--text-color); font-size: 1rem; cursor: pointer; flex-shrink: 0;}
+.home-btn { width: 28px; height: 28px; margin: 0; padding: 0; border: none; border-radius: var(--radius-s); background: transparent; color: var(--text-color); font-size: 1rem; cursor: pointer; flex-shrink: 0; position: relative;}
+.home-btn::after { content: ''; position: absolute; inset: -8px;}
 .header.room-name { color: var(--accent-color); font-weight: bold; cursor: default; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; font-size: 0.95rem; max-width: 14em; min-width: 0; flex: 0 1 auto;}
-.header-copy-btn { background: #334155; color: #f8fafc; border: none; padding: 3px 8px; border-radius: 12px; cursor: pointer; font-size: 0.66rem; line-height: 1.2; flex-shrink: 0; width: auto; margin: 0;}
-.version-tag { font-size: 0.58rem; color: #64748b; flex-shrink: 0; margin-left: auto; cursor: pointer;}
-#qr-panel { position: fixed; right: 10px; z-index: 9000; background: #f8fafc; padding: 12px 12px 10px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.45); text-align: center; width: 204px;}
+.header-copy-btn { background: #334155; color: #f8fafc; border: none; padding: 8px 12px; border-radius: var(--radius-l); cursor: pointer; font-size: 0.75rem; line-height: 1.2; flex-shrink: 0; width: auto; margin: 0; min-height: 36px; align-items: center;}
+.version-tag { font-size: 0.58rem; color: #64748b; flex-shrink: 0; margin-left: auto; cursor: pointer; padding: 9px 6px 9px 14px;}
+#qr-panel { position: fixed; right: 10px; z-index: 9000; background: #f8fafc; padding: 12px 12px 10px; border-radius: var(--radius-l); box-shadow: 0 8px 24px rgba(0,0,0,0.45); text-align: center; width: 204px;}
 #qr-panel svg { width: 180px; height: 180px; display: block;}
 #qr-close { position: absolute; top: 4px; right: 6px; width: auto; margin: 0; padding: 2px 7px; background: transparent; border: none; color: #475569; font-size: 0.85rem; cursor: pointer;}
 #qr-caption { color: #0f172a; font-size: 0.78rem; font-weight: bold; margin-top: 6px;}
 #qr-url { color: #64748b; font-size: 0.58rem; word-break: break-all; margin-top: 2px; line-height: 1.3;}
 .header-members { display: flex; align-items: flex-start; gap: 6px; min-width: 0;}
 .member-block { flex: 1; min-width: 0;}
-.member-count { font-size: 0.68rem; color: var(--text-muted); line-height: 1.2;}
-.member-names { font-size: 0.68rem; color: #cbd5e1; line-height: 1.25; word-break: break-all;}
-.member-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+.member-chip { background: #334155; color: #e2e8f0; border: none; border-radius: 999px; padding: 6px 12px; font-size: 0.75rem; line-height: 1.25; cursor: pointer; width: auto; margin: 0; min-height: 32px; display: inline-flex; align-items: center;}
 .btn-action-group { display: flex; gap: 4px; flex-shrink: 0; align-items: stretch;}
-.btn-leave,.btn-host-action { width: 42px; min-width: 42px; margin: 0; padding: 4px 2px; border: none; border-radius: 4px; color: white; font-size: 0.62rem; font-weight: bold; line-height: 1.15; cursor: pointer; text-align: center;}
+.btn-leave,.btn-host-action { width: 46px; min-width: 46px; min-height: 40px; margin: 0; padding: 6px 2px; border: none; border-radius: var(--radius-s); color: white; font-size: 0.68rem; font-weight: bold; line-height: 1.15; cursor: pointer; text-align: center;}
 .btn-leave { background: #64748b; display: inline-flex; align-items: center; justify-content: center;}
 .btn-host-action { background: #ef4444; display: none; align-items: center; justify-content: center;}
 .btn-kick { background: #f59e0b; color: #111827;}
@@ -343,20 +345,20 @@ body { background-color: var(--bg-color); color: var(--text-color); margin: 0; p
 .view.active { display: flex;}
 #view-chat { padding: 0; overflow: hidden; position: relative;}
 label { font-size: 0.85rem; color: var(--text-muted); margin-top: 12px; display: block;}
-input, textarea, select { width: 100%; padding: 12px; margin-top: 6px; border-radius: 8px; border: 1px solid var(--border-color); background: #0f172a; color: white; outline: none; font-size: 16px;}
+input, textarea, select { width: 100%; padding: 12px; margin-top: 6px; border-radius: var(--radius-m); border: 1px solid var(--border-color); background: #0f172a; color: white; outline: none; font-size: 16px;}
 input:focus, textarea:focus, select:focus { border-color: var(--accent-color);}
 textarea { resize: none; height: 44px; font-size: 16px; line-height: 1.4;}
-button { width: 100%; padding: 12px; margin-top: 18px; border-radius: 8px; border: none; background: var(--accent-color); color: #0f172a; font-weight: bold; cursor: pointer;}
+button { width: 100%; padding: 12px; margin-top: 18px; border-radius: var(--radius-m); border: none; background: var(--accent-color); color: #0f172a; font-weight: bold; cursor: pointer;}
 .btn-secondary { background: #475569; color: white;}
 .max-members-group { display: flex; gap: 8px; margin-top: 8px;}
 .max-members-group label { margin: 0; flex: 1;}
 .max-members-group input[type="radio"] { display: none;}
-.max-members-group span { display: block; text-align: center; padding: 10px 0; border-radius: 8px; border: 1px solid var(--border-color); background: #0f172a; color: var(--text-muted); cursor: pointer; font-size: 0.9rem;}
+.max-members-group span { display: block; text-align: center; padding: 10px 0; border-radius: var(--radius-m); border: 1px solid var(--border-color); background: #0f172a; color: var(--text-muted); cursor: pointer; font-size: 0.9rem;}
 .max-members-group input[type="radio"]:checked + span { border-color: var(--accent-color); background: #0c4a6e; color: white; font-weight: bold;}
 .my-rooms-section { margin-bottom: 14px; display: none;}
 .my-rooms-title { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 8px; font-weight: bold;}
 .room-card-list { display: flex; flex-direction: column; gap: 8px;}
-.room-card { background: #0f172a; border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; cursor: pointer;}
+.room-card { background: #0f172a; border: 1px solid var(--border-color); padding: 12px; border-radius: var(--radius-m); display: flex; justify-content: space-between; align-items: center; cursor: pointer;}
 .room-card-info { display: flex; flex-direction: column; gap: 2px; min-width: 0;}
 .room-card-name { font-weight: bold; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
 .room-card-meta { font-size: 0.72rem; color: var(--text-muted);}
@@ -364,7 +366,7 @@ button { width: 100%; padding: 12px; margin-top: 18px; border-radius: 8px; borde
 .section-card {
 background: #0f172a;
 border: 1px solid var(--border-color);
-border-radius: 12px;
+border-radius: var(--radius-l);
 padding: 16px 14px;
 margin-bottom: 14px;
 }
@@ -440,7 +442,7 @@ flex-shrink: 0;
 .pull-indicator.show { display: flex;}
 .spinner { width: 18px; height: 18px; border: 2px solid #334155; border-top-color: var(--accent-color); border-radius: 50%; animation: spin 0.7s linear infinite;}
 @keyframes spin { to { transform: rotate(360deg);}}
-.message { display: flex; flex-direction: column; width: fit-content; max-width: 80%; padding: 6px 10px; border-radius: 12px; position: relative; word-break: break-word; align-self: flex-start; font-size: 0.85rem; line-height: 1.4;}
+.message { display: flex; flex-direction: column; width: fit-content; max-width: 80%; padding: 6px 10px; border-radius: var(--radius-l); position: relative; word-break: break-word; align-self: flex-start; font-size: 0.95rem; line-height: 1.55;}
 .message.self { align-self: flex-end; background: #0284c7; color: white;}
 .message.self .sender { color: #e0f2fe;}
 .message.user-color-0 { background: #334155; color: #f8fafc;}
@@ -451,80 +453,109 @@ flex-shrink: 0;
 .message .text-content { white-space: pre-wrap;}
 .message .del-btn { margin-left: auto; cursor: pointer; color: #fca5a5; font-size: 0.75rem; opacity: 0.85; flex-shrink: 0; padding-left: 8px;}
 .system-notification { text-align: center; font-size: 0.75rem; color: var(--text-muted); margin: 4px 0; align-self: center;}
-.reset-prompt { align-self: center; text-align: center; background: rgba(128, 128, 128, 0.14); border-radius: 10px; padding: 8px 16px; margin: 4px 0; font-size: 0.82rem;}
-.reset-prompt-title { font-weight: bold; font-size: 0.7rem; color: var(--text-muted); margin-bottom: 2px;}
+.reset-prompt { align-self: center; text-align: center; background: rgba(128, 128, 128, 0.14); border-radius: var(--radius-m); padding: 8px 16px; margin: 4px 0; font-size: 0.82rem;}
+.reset-prompt-title { font-weight: bold; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px;}
 #mosaic-modal { position: fixed; inset: 0; background: rgba(10, 10, 14, 0.96); z-index: 400; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 14px; box-sizing: border-box;}
 #mosaic-modal.active { display: flex;}
 #mosaic-close { position: absolute; top: max(12px, env(safe-area-inset-top)); right: 14px; width: 52px; height: 52px; border-radius: 50%; border: none; background: rgba(255,255,255,0.16); color: #fff; font-size: 1.5rem; line-height: 1; cursor: pointer; z-index: 2;}
 #mosaic-stage { position: relative; touch-action: none; line-height: 0;}
-#mosaic-canvas { max-width: 94vw; max-height: 58vh; border-radius: 6px;}
+#mosaic-canvas { max-width: 94vw; max-height: 58vh; border-radius: var(--radius-s);}
 .mosaic-region { position: absolute; border: 2px dashed #fff; cursor: move; box-sizing: border-box;}
 .mosaic-region.circle { border-radius: 50%;}
 .mosaic-region.selected { border: 2px solid var(--accent-color);}
 .mosaic-handle { position: absolute; right: -14px; bottom: -14px; width: 28px; height: 28px; border-radius: 50%; background: #fff; border: 2px solid #888; cursor: nwse-resize; box-sizing: border-box;}
 .mosaic-add-row { display: flex; gap: 10px;}
-.mosaic-add-row button { flex: 1; padding: 9px; border: none; border-radius: 10px; font-size: 0.85rem; cursor: pointer;}
+.mosaic-add-row button { flex: 1; padding: 9px; border: none; border-radius: var(--radius-m); font-size: 0.85rem; cursor: pointer;}
 #mosaic-controls { width: min(94vw, 520px); display: flex; flex-direction: column; gap: 10px;}
 .mosaic-strength-row { display: flex; align-items: center; gap: 10px; color: #fff; font-size: 0.85rem;}
 .mosaic-mode-row { display: flex; gap: 8px;}
-.mosaic-mode-btn { flex: 1; background: #334155; color: #f8fafc; border: 1px solid #475569; padding: 7px 0; border-radius: 10px; cursor: pointer; font-size: 0.85rem; margin: 0; width: auto;}
+.mosaic-mode-btn { flex: 1; background: #334155; color: #f8fafc; border: 1px solid #475569; padding: 7px 0; border-radius: var(--radius-m); cursor: pointer; font-size: 0.85rem; margin: 0; width: auto;}
 .mosaic-mode-btn.active { background: #38bdf8; color: #082f49; border-color: #38bdf8; font-weight: 700;}
 .chat-top-row { display: flex; justify-content: flex-start; padding: 4px 2px 0;}
-.img-help-btn { background: #334155; color: #e2e8f0; border: 1px solid #475569; padding: 3px 10px; border-radius: 12px; cursor: pointer; font-size: 0.7rem; line-height: 1.3; width: auto; margin: 0;}
+.img-help-btn { background: #334155; color: #e2e8f0; border: 1px solid #475569; padding: 8px 14px; border-radius: var(--radius-l); cursor: pointer; font-size: 0.75rem; line-height: 1.3; width: auto; margin: 0; min-height: 36px;}
 #img-help-modal { position: fixed; inset: 0; background: rgba(10, 10, 14, 0.85); z-index: 450; display: none; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box;}
-.img-help-card { position: relative; background: #1e293b; color: #f1f5f9; border-radius: 14px; padding: 20px 18px; max-width: 520px; width: 100%; max-height: 85vh; overflow-y: auto; box-sizing: border-box;}
+.img-help-card { position: relative; background: #1e293b; color: #f1f5f9; border-radius: var(--radius-l); padding: 20px 18px; max-width: 520px; width: 100%; max-height: 85vh; overflow-y: auto; box-sizing: border-box;}
 .img-help-close { position: absolute; top: 8px; right: 8px; background: #334155; color: #fff; border: none; width: 34px; height: 34px; border-radius: 50%; font-size: 1rem; cursor: pointer; margin: 0;}
 .img-help-title { font-size: 1.05rem; font-weight: 700; margin-bottom: 6px;}
 .img-help-head { font-size: 0.92rem; font-weight: 700; color: #7dd3fc; margin: 12px 0 4px;}
 .img-help-text { font-size: 0.85rem; line-height: 1.6; margin: 0;}
 .mosaic-strength-row input[type="range"] { flex: 1;}
 .mosaic-btn-row { display: flex; gap: 10px;}
-.mosaic-btn-row button { flex: 1; padding: 12px; border: none; border-radius: 10px; font-size: 1rem; cursor: pointer;}
+.mosaic-btn-row button { flex: 1; padding: 12px; border: none; border-radius: var(--radius-m); font-size: 1rem; cursor: pointer;}
 .mosaic-sub-btn { background: rgba(255,255,255,0.16); color: #fff;}
 .mosaic-ok-btn { background: var(--accent-color); color: #fff; font-weight: bold;}
 .chat-img { max-width: 100%; max-height: 200px; border-radius: 8px; margin-top: 6px; cursor: pointer; user-select: none; -webkit-user-drag: none; display: block;}
-.chat-img-poster-thumb { width: auto; height: 200px; max-width: 100%; border-radius: 6px; margin-top: 6px; image-rendering: pixelated; border: 1px dashed #94a3b8; opacity: 0.85; display: block;}
-.expired-img-note { font-size: 0.72rem; color: #f87171; font-style: italic; margin-top: 4px;}
-.poster-only-note { font-size: 0.68rem; color: var(--text-muted); margin-top: 2px;}
-.message-timestamp { font-size: 0.62rem; color: var(--text-muted); line-height: 1.2; white-space: nowrap;}
+.chat-img-poster-thumb { width: auto; height: 200px; max-width: 100%; border-radius: 8px; margin-top: 6px; image-rendering: pixelated; border: 1px dashed #94a3b8; opacity: 0.85; display: block;}
+.expired-img-note { font-size: 0.75rem; color: #f87171; font-style: italic; margin-top: 4px;}
+.poster-only-note { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;}
+.message-timestamp { font-size: 0.75rem; color: var(--text-muted); line-height: 1.2; white-space: nowrap;}
 .msg-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px;}
 .img-wrap { position: relative; display: inline-block; max-width: 100%; margin-top: 6px;}
 .img-wrap .chat-img { margin-top: 0;}
-.img-badge { position: absolute; top: 6px; left: 6px; background: rgba(2,6,23,0.72); color: #e2e8f0; font-size: 0.65rem; padding: 2px 7px; border-radius: 999px; pointer-events: none;}
+.img-badge { position: absolute; top: 6px; left: 6px; background: rgba(2,6,23,0.72); color: #e2e8f0; font-size: 0.75rem; padding: 2px 7px; border-radius: 999px; pointer-events: none;}
 .input-area { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px calc(4px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border-color); flex-shrink: 0; background: var(--card-bg);}
 .typing-indicator { font-size: 0.75rem; color: var(--text-muted); font-style: italic; min-height: 0.2rem;}
-.display-time-row { display: flex; align-items: center; gap: 6px; font-size: 0.68rem; color: var(--text-muted);}
-.display-time-row select { width: auto; padding: 2px 6px; margin: 0; font-size: 0.72rem; border-radius: 8px;}
+.display-time-row { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: var(--text-muted);}
+.display-time-row select { width: auto; padding: 2px 6px; margin: 0; font-size: 0.8rem; border-radius: var(--radius-m);}
+.dt-label { text-align: center; line-height: 1.35;}
 .input-row { display: flex; gap: 8px; align-items: flex-end;}
-.file-btn { background: #475569; color: white; padding: 12px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; margin: 0; width: 46px; height: 46px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;}
-.post-mode-toggle { display: flex; background: #1e293b; border: 1px solid #475569; border-radius: 999px; padding: 2px; gap: 2px; flex-shrink: 0; align-self: center;}
-.post-mode-btn { background: transparent; color: #94a3b8; border: none; padding: 5px 9px; border-radius: 999px; cursor: pointer; font-size: 0.68rem; line-height: 1.2; width: auto; margin: 0; white-space: nowrap;}
-.post-mode-btn.active { background: #38bdf8; color: #082f49; font-weight: 700;}
+.file-btn { background: #475569; color: white; padding: 12px 10px; border-radius: var(--radius-m); cursor: pointer; font-size: 0.9rem; margin: 0; width: auto; min-width: 46px; height: 46px; display: flex; align-items: center; justify-content: center; gap: 4px; flex-shrink: 0;}
+.post-mode-toggle { position: relative; display: flex; background: #1e293b; border: 1px solid #475569; border-radius: var(--radius-l); padding: 2px; flex: 1; margin-left: auto; max-width: 46%;}
+.post-mode-knob { position: absolute; top: 2px; left: 2px; width: calc(50% - 2px); height: calc(100% - 4px); background: #38bdf8; border-radius: 12px; transition: transform 0.18s cubic-bezier(0.2, 0, 0, 1);}
+.post-mode-toggle.mosaic .post-mode-knob { transform: translateX(100%);}
+.post-mode-btn { position: relative; z-index: 1; flex: 1; background: transparent; color: #94a3b8; border: none; padding: 4px 0; border-radius: 12px; cursor: pointer; font-size: 0.68rem; line-height: 1.35; width: auto; margin: 0; text-align: center;}
+.post-mode-btn.active { background: transparent; color: #082f49; font-weight: 700;}
 #file-pick-btn { border: none;}
 .input-row textarea { margin: 0; min-height: 46px;}
 .input-row button { margin: 0; width: 52px; height: 46px; padding: 0; flex-shrink: 0; line-height: 1.15;}
 .security-disclaimer { font-size: 0.92rem; color: var(--text-muted); line-height: 1.45; margin-top: 2px; padding: 0 2px;}
 #full-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(4px); z-index: 9999; display: none; justify-content: center; align-items: center;}
-.toast-message { background: #ef4444; color: white; padding: 14px 28px; border-radius: 12px; font-weight: bold; font-size: 1rem; text-align: center;}
+.toast-message { background: #ef4444; color: white; padding: 14px 28px; border-radius: var(--radius-l); font-weight: bold; font-size: 1rem; text-align: center;}
 .modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.75); z-index: 10000; display: none; justify-content: center; align-items: center;}
 .modal-overlay.active { display: flex;}
-.modal-box { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; width: 90%; max-width: 340px;}
+.modal-box { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--radius-l); padding: 20px; width: 90%; max-width: 340px;}
 .modal-box h3 { font-size: 1rem; margin-bottom: 12px;}
 .modal-box p { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px;}
 .modal-actions { display: flex; gap: 8px;}
 .modal-actions button { margin: 0; flex: 1; padding: 10px; font-size: 0.85rem;}
 .modal-member-list { max-height: 200px; overflow-y: auto; margin-bottom: 12px;}
-.modal-member-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-radius: 6px; background: #0f172a; margin-bottom: 6px; font-size: 0.85rem;}
+.modal-member-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-radius: var(--radius-s); background: #0f172a; margin-bottom: 6px; font-size: 0.85rem;}
 .modal-member-item button { width: auto; margin: 0; padding: 4px 10px; font-size: 0.75rem; background: #f59e0b; color: #0f172a;}
 #view-chat.drag-over { box-shadow: inset 0 0 0 2px var(--accent-color); }
 #image-modal { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.92); z-index: 10001; display: none; justify-content: center; align-items: center; padding: 12px;}
 #image-modal.active { display: flex;}
-#image-modal-img { max-width: 100vw; max-height: 100vh; object-fit: contain; border-radius: 4px; user-select: none; -webkit-user-drag: none;}
+#image-modal-img { max-width: 100vw; max-height: 100vh; object-fit: contain; border-radius: var(--radius-s); user-select: none; -webkit-user-drag: none;}
 #image-modal-close { position: fixed; top: calc(12px + env(safe-area-inset-top)); right: 12px; width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(248,250,252,0.95); color: #0f172a; font-size: 1.4rem; font-weight: bold; cursor: pointer; z-index: 10002; margin: 0;}
 #image-modal-note { color: var(--text-muted); font-size: 0.75rem; margin-top: 8px; text-align: center;}
-.soft-toast { position: fixed; bottom: calc(24px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); background: rgba(30,41,59,0.92); color: #e2e8f0; padding: 8px 16px; border-radius: 8px; font-size: 0.8rem; z-index: 10003; opacity: 0; transition: opacity 0.2s; pointer-events: none;}
+.soft-toast { position: fixed; bottom: calc(24px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); background: rgba(30,41,59,0.92); color: #e2e8f0; padding: 8px 16px; border-radius: var(--radius-m); font-size: 0.8rem; z-index: 10003; opacity: 0; transition: opacity 0.2s; pointer-events: none;}
 .soft-toast.show { opacity: 1;}
-.waiting-msg-banner { background: #0c4a6e; border: 1px solid #38bdf8; padding: 10px; border-radius: 8px; font-size: 0.8rem; color: #f8fafc; margin-bottom: 12px;}
+.waiting-msg-banner { background: #0c4a6e; border: 1px solid #38bdf8; padding: 10px; border-radius: var(--radius-m); font-size: 0.8rem; color: #f8fafc; margin-bottom: 12px;}
+/* Ver.2.3.40: UI/UX改善 (モックで承認された13項目) */
+button { transition: transform 150ms ease-out;}
+button:active:not(:disabled):not(.post-mode-btn) { transform: scale(0.96);}
+.room-card { transition: transform 150ms ease-out;}
+.room-card:active { transform: scale(0.96);}
+@keyframes modalIn { from { opacity: 0; transform: scale(0.98);} to { opacity: 1; transform: scale(1);} }
+@keyframes modalOut { from { opacity: 1; transform: scale(1);} to { opacity: 0; transform: scale(0.99);} }
+.modal-overlay.active .modal-box { animation: modalIn 0.2s ease-out;}
+.modal-overlay.closing .modal-box { animation: modalOut 0.15s ease-out forwards;}
+#img-help-modal .img-help-card { animation: modalIn 0.2s ease-out;}
+#img-help-modal.closing .img-help-card { animation: modalOut 0.15s ease-out forwards;}
+#image-modal.active #image-modal-inner { animation: modalIn 0.2s ease-out;}
+#image-modal.closing #image-modal-inner { animation: modalOut 0.15s ease-out forwards;}
+#qr-panel { animation: modalIn 0.2s ease-out;}
+#qr-panel.closing { animation: modalOut 0.15s ease-out forwards;}
+#mosaic-modal.active #mosaic-stage, #mosaic-modal.active #mosaic-controls { animation: modalIn 0.2s ease-out;}
+#mosaic-modal.closing #mosaic-stage, #mosaic-modal.closing #mosaic-controls { animation: modalOut 0.15s ease-out forwards;}
+.img-help-card, .modal-member-list, #mosaic-modal, .view, #home-room-list { overscroll-behavior: contain;}
+.chat-img { outline: 1px solid oklch(1 0 0 / 0.1); outline-offset: -1px;}
+#image-modal-img { outline: 1px solid oklch(1 0 0 / 0.1); outline-offset: -1px;}
+.file-btn-label { font-size: 0.68rem; line-height: 1; white-space: nowrap;}
+.img-remain { display: block; height: 3px; background: rgba(255,255,255,0.18); border-radius: 999px; margin-top: 4px; overflow: hidden;}
+.img-remain-fill { display: block; height: 100%; width: 100%; background: var(--accent-color); border-radius: 999px;}
+#drop-overlay { position: absolute; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; background: rgba(2, 132, 199, 0.25); pointer-events: none;}
+#drop-overlay.show { display: flex;}
+.drop-overlay-inner { border: 2px dashed var(--accent-color); border-radius: var(--radius-l); background: rgba(15, 23, 42, 0.88); color: var(--text-color); font-size: 1.05rem; font-weight: bold; text-align: center; padding: 28px 36px; line-height: 1.6;}
 </style>
 </head>
 <body>
@@ -575,18 +606,24 @@ flex-shrink: 0;
 </div>
 </div>
 </div>
+<div id="members-modal" class="modal-overlay">
+<div class="modal-box">
+<h3>参加メンバー</h3>
+<div id="members-list" class="modal-member-list"></div>
+<div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeMembersModal()">閉じる</button></div>
+</div>
+</div>
 <div class="container">
 <div class="header">
 <div class="header-top">
 <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
 <span class="room-name" id="header-room-name">SimpleChatee</span>
 <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.37</span>
+<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.40</span>
 </div>
 <div class="header-members" id="header-room-id-container" style="display:none;">
 <div class="member-block">
-<div class="member-count" id="member-count"></div>
-<div class="member-names" id="member-names"></div>
+<button type="button" class="member-chip" id="member-count" onclick="openMembersModal()"></button>
 </div>
 <div class="btn-action-group" id="room-action-container">
 <button type="button" id="btn-delete-room" class="btn-host-action" onclick="deleteRoom()">部屋<br>削除</button>
@@ -671,10 +708,11 @@ flex-shrink: 0;
 <div class="img-help-head">写真投稿</div>
 <p class="img-help-text">・指定した時間だけ画像がそのまま表示されます。<br>時間内ならサムネクリックで大きな画像も閲覧可能。<br>指定時間になると粗モザイク画像になりクリックも出来なくなり元画像はサーバーからも完全に削除されます。</p>
 <div class="img-help-head">モザイク投稿</div>
-<p class="img-help-text">範囲指定をした箇所にモザイクの強さを選んで投稿ができます。（複数箇所可能）<br>編集画面の上で「モザイク」「ぼかし」を切り替えられます。ぼかしは顔の特徴が溶けて消えるので、変顔に見えにくくなります。<br>左下のスイッチで「写真投稿」「モザイク投稿」を切り替えます。モザイク投稿にする時は、スイッチを切り替えてから画像を選んでください。<br>指定時間になると粗モザイク画像になりクリックも出来なくなり元画像はサーバーからも完全に削除されます。</p>
+<p class="img-help-text">範囲指定をした箇所にモザイクの強さを選んで投稿ができます。（複数箇所可能）<br>編集画面の上で「モザイク」「ぼかし」を切り替えられます。ぼかしは顔の特徴が溶けて消えるので、変顔に見えにくくなります。<br>設定行のスイッチで「写真投稿」「モザイク投稿」を切り替えます。モザイク投稿にする時は、スイッチを切り替えてから画像を選んでください。<br>指定時間になると粗モザイク画像になりクリックも出来なくなり元画像はサーバーからも完全に削除されます。</p>
 </div>
 </div>
 <div id="view-chat" class="view">
+<div id="drop-overlay"><div class="drop-overlay-inner">📷<br>離して投稿</div></div>
 <div class="chat-top-row"><button type="button" class="img-help-btn" id="img-help-btn" onclick="openImageHelp()">画像投稿の使い方</button></div>
 <div id="recent-strip"></div>
 <div id="pull-indicator" class="pull-indicator"><span class="spinner"></span></div>
@@ -683,7 +721,7 @@ flex-shrink: 0;
 <div id="file-name-preview" style="font-size: 0.75rem; color: var(--accent-color); display: none;"></div>
 <div id="typing-indicator" class="typing-indicator"></div>
 <div class="display-time-row" id="display-time-control" style="display:none;">
-<span>画像表示時間</span>
+<span class="dt-label">画像<br>表示</span>
 <select id="image-display-select" onchange="changeImageDisplayTime()">
 <option value="0">粗サムネのみ</option>
 <option value="1">1秒</option>
@@ -693,7 +731,7 @@ flex-shrink: 0;
 <option value="10">10秒</option>
 <option value="3600">1時間</option>
 </select>
-<span id="thumb-quality-label">粗サムネ品質</span>
+<span class="dt-label" id="thumb-quality-label">粗サムネ<br>品質</span>
 <select id="thumb-quality-select" onchange="changeThumbQuality()">
 <option value="0.1">0.1</option>
 <option value="0.2">0.2</option>
@@ -706,10 +744,10 @@ flex-shrink: 0;
 <option value="0.9">0.9</option>
 <option value="1">1.0</option>
 </select>
+<div class="post-mode-toggle" id="post-mode-toggle"><span class="post-mode-knob"></span><button type="button" class="post-mode-btn active" id="post-mode-photo" onclick="setPostMode('photo')">写真<br>投稿</button><button type="button" class="post-mode-btn" id="post-mode-mosaic" onclick="setPostMode('mosaic')">モザイク<br>投稿</button></div>
 </div>
 <div class="input-row">
-<div class="post-mode-toggle" id="post-mode-toggle"><button type="button" class="post-mode-btn active" id="post-mode-photo" onclick="setPostMode('photo')">写真投稿</button><button type="button" class="post-mode-btn" id="post-mode-mosaic" onclick="setPostMode('mosaic')">モザイク投稿</button></div>
-<button type="button" class="file-btn" id="file-pick-btn" onclick="pickImageFile()">📷</button>
+<button type="button" class="file-btn" id="file-pick-btn" onclick="pickImageFile()">📷<span class="file-btn-label" id="file-mode-label">写真</span></button>
 <input type="file" id="file-input" accept="image/*" style="display:none;" onchange="onFileSelected(this)">
 <input type="file" id="mosaic-file-input" accept="image/*" style="display:none;" onchange="onMosaicFileSelected(this)">
 <textarea id="msg-input" placeholder="メッセージを入力..." oninput="handleTyping()" onkeydown="onKeyDown(event)"></textarea>
@@ -763,6 +801,18 @@ const pb = document.getElementById('post-mode-photo');
 const mb = document.getElementById('post-mode-mosaic');
 if (pb) pb.classList.toggle('active', postMode === 'photo');
 if (mb) mb.classList.toggle('active', postMode === 'mosaic');
+const tg = document.getElementById('post-mode-toggle');
+if (tg) tg.classList.toggle('mosaic', postMode === 'mosaic');
+const fl = document.getElementById('file-mode-label');
+if (fl) fl.textContent = (postMode === 'mosaic')? 'モザイク': '写真';
+}
+/* Ver.2.3.40: PC (精密ポインタ) でのみ、入力欄にドロップ/貼り付け投稿のヒントを出す */
+function updateMsgPlaceholder() {
+const ta = document.getElementById('msg-input');
+if (!ta) return;
+const fine = !!(window.matchMedia && window.matchMedia('(pointer: fine)').matches);
+const canPost = !!currentRoomId && !isPublicRoom && currentRoomId !== PUBLIC_ROOM_ID;
+ta.placeholder = (fine && canPost)? 'メッセージを入力...（画像はドロップ／貼り付けでも投稿できます）': 'メッセージを入力...';
 }
 function pickImageFile() {
 const input = document.getElementById(postMode === 'mosaic'? 'mosaic-file-input': 'file-input');
@@ -772,6 +822,7 @@ let pendingResetTimer = null;
 let keepAliveTimer = null;
 let lastChatActivityAt = Date.now();
 let pendingKickSessionId = null;
+let currentMemberNames = [];
 let pendingKickNickname = null;
 let typingTimeout = null;
 let isTyping = false;
@@ -811,17 +862,42 @@ const full = name || 'SimpleChatee';
 el.textContent = truncateLabel(full, 14);
 el.title = full;
 }
+/* Ver.2.3.40: メンバー名はヘッダーに並べず保持だけし、チップのタップで閲覧専用モーダルに出す */
 function renderMemberNames(names) {
-const el = document.getElementById('member-names');
+currentMemberNames = Array.isArray(names)? names.slice(): [];
+renderMembersList();
+}
+function renderMembersList() {
+const el = document.getElementById('members-list');
 if (!el) return;
 el.innerHTML = '';
-const list = Array.isArray(names)? names: [];
-for (let i = 0; i < list.length; i += 3) {
-const line = document.createElement('div');
-line.className = 'member-line';
-line.textContent = list.slice(i, i + 3).map(function(n) { return truncateLabel(n, 9);}).join(' ');
-el.appendChild(line);
+if (!currentMemberNames.length) {
+const empty = document.createElement('div');
+empty.className = 'modal-member-item';
+empty.textContent = '参加者がいません';
+el.appendChild(empty);
+return;
 }
+currentMemberNames.forEach(function(n) {
+const item = document.createElement('div');
+item.className = 'modal-member-item';
+const span = document.createElement('span');
+span.textContent = n;
+item.appendChild(span);
+el.appendChild(item);
+});
+}
+function openMembersModal() {
+if (!currentRoomId) return;
+renderMembersList();
+document.getElementById('members-modal').classList.add('active');
+}
+function closeMembersModal() { closeModalWithAnim(document.getElementById('members-modal')); }
+/* Ver.2.3.40: モーダル退場 (150ms) 用の共通処理 */
+function closeModalWithAnim(overlay) {
+if (!overlay || !overlay.classList.contains('active')) return;
+overlay.classList.add('closing');
+setTimeout(function() { overlay.classList.remove('active'); overlay.classList.remove('closing'); }, 150);
 }
 function bindVisualViewport() {
 const vv = window.visualViewport;
@@ -1458,7 +1534,8 @@ setRoomTitle('SimpleChatee');
 document.getElementById('header-copy-btn').style.display = 'none';
 document.getElementById('header-room-id-container').style.display = 'none';
 document.getElementById('member-count').innerText = '';
-document.getElementById('member-names').innerHTML = '';
+currentMemberNames = [];
+updateMsgPlaceholder();
 document.getElementById('btn-delete-room').style.display = 'none';
 document.getElementById('btn-kick').style.display = 'none';
 document.getElementById('display-time-control').style.display = 'none';
@@ -1587,7 +1664,7 @@ if (isPublicRoom || currentRoomId === PUBLIC_ROOM_ID) return;
 socket.emit('get_members_for_kick', { roomId: currentRoomId});
 document.getElementById('kick-modal').classList.add('active');
 }
-function closeKickModal() { document.getElementById('kick-modal').classList.remove('active');}
+function closeKickModal() { closeModalWithAnim(document.getElementById('kick-modal')); }
 function confirmKick(sessionId, nickname) {
 pendingKickSessionId = sessionId;
 pendingKickNickname = nickname;
@@ -1596,7 +1673,7 @@ closeKickModal();
 document.getElementById('kick-confirm-modal').classList.add('active');
 }
 function closeKickConfirmModal() {
-document.getElementById('kick-confirm-modal').classList.remove('active');
+closeModalWithAnim(document.getElementById('kick-confirm-modal'));
 pendingKickSessionId = null;
 pendingKickNickname = null;
 }
@@ -1651,11 +1728,35 @@ if (stripEl2) stripEl2.innerHTML = '';
 const chatView = document.getElementById('view-chat');
 if (chatView && !chatView.dataset.dndBound) {
 chatView.dataset.dndBound = '1';
-chatView.addEventListener('dragover', function(e) { e.preventDefault(); chatView.classList.add('drag-over'); });
-chatView.addEventListener('dragleave', function(e) { if (e.relatedTarget && chatView.contains(e.relatedTarget)) return; chatView.classList.remove('drag-over'); });
+/* Ver.2.3.40: ドラッグ中は全面オーバーレイ「離して投稿」を出す。ペースト投稿も同じ経路に流す */
+let dragDepth = 0;
+const dropOverlay = document.getElementById('drop-overlay');
+const dragHasFiles = function(e) { return !!(e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0); };
+const showDropOverlay = function() { chatView.classList.add('drag-over'); if (dropOverlay) dropOverlay.classList.add('show'); };
+const hideDropOverlay = function() { dragDepth = 0; chatView.classList.remove('drag-over'); if (dropOverlay) dropOverlay.classList.remove('show'); };
+chatView.addEventListener('dragenter', function(e) { e.preventDefault(); if (!dragHasFiles(e)) return; dragDepth++; showDropOverlay(); });
+chatView.addEventListener('dragover', function(e) { e.preventDefault(); if (dragHasFiles(e)) showDropOverlay(); });
+chatView.addEventListener('dragleave', function(e) { dragDepth = Math.max(0, dragDepth - 1); if (dragDepth <= 0) hideDropOverlay(); });
+document.addEventListener('dragend', hideDropOverlay);
+document.addEventListener('drop', function(e) { if (dragHasFiles(e)) e.preventDefault(); hideDropOverlay(); });
+document.addEventListener('paste', function(e) {
+if (!chatView.classList.contains('active') || !currentRoomId) return;
+if (isPublicRoom || currentRoomId === PUBLIC_ROOM_ID) return;
+const items = (e.clipboardData && e.clipboardData.items) || [];
+for (let i = 0; i < items.length; i++) {
+if (items[i].type && items[i].type.indexOf('image/') === 0) {
+const file = items[i].getAsFile();
+if (!file) continue;
+e.preventDefault();
+if (postMode === 'mosaic') openMosaicEditorWithFile(file);
+else postImageFile(file);
+return;
+}
+}
+});
 chatView.addEventListener('drop', function(e) {
 e.preventDefault();
-chatView.classList.remove('drag-over');
+hideDropOverlay();
 if (!currentRoomId) return;
 const files = Array.prototype.slice.call((e.dataTransfer && e.dataTransfer.files) || []).filter(function(f) { return f.type && f.type.indexOf('image/') === 0; });
 if (postMode === 'mosaic') {
@@ -1666,6 +1767,7 @@ files.forEach(function(f) { postImageFile(f); });
 });
 }
 showView('view-chat');
+updateMsgPlaceholder();
 const container = document.getElementById('chat-messages');
 container.innerHTML = '';
 (messages || []).forEach(function(msg) {
@@ -1704,6 +1806,7 @@ document.getElementById('qr-code').innerHTML = '';
 const header = document.querySelector('.header');
 const bottom = header? header.getBoundingClientRect().bottom: 56;
 panel.style.top = (bottom + 8) + 'px';
+panel.classList.remove('closing');
 panel.style.display = 'block';
 const seq = ++qrRequestSeq;
 let finished = false;
@@ -1731,12 +1834,19 @@ finish(buildRoomQrUrl());
 }
 function closeRoomQr() {
 const panel = document.getElementById('qr-panel');
-if (panel) panel.style.display = 'none';
+if (!panel || panel.style.display === 'none') return;
+panel.classList.add('closing');
+setTimeout(function() { panel.style.display = 'none'; panel.classList.remove('closing'); }, 150);
 }
 
 /* Ver.2.3.34: 画像投稿の使い方モーダル */
-function openImageHelp() { document.getElementById('img-help-modal').style.display = 'flex'; }
-function closeImageHelp() { document.getElementById('img-help-modal').style.display = 'none'; }
+function openImageHelp() { const m = document.getElementById('img-help-modal'); m.classList.remove('closing'); m.style.display = 'flex'; }
+function closeImageHelp() {
+const m = document.getElementById('img-help-modal');
+if (!m || m.style.display !== 'flex') return;
+m.classList.add('closing');
+setTimeout(function() { m.style.display = 'none'; m.classList.remove('closing'); }, 150);
+}
 function changeImageDisplayTime() {
 const seconds = parseInt(document.getElementById('image-display-select').value, 10);
 if (isNaN(seconds) || ![0, 1, 2, 3, 5, 10, 3600].includes(seconds)) return;
@@ -1894,7 +2004,11 @@ mosaicSelected = mosaicRegions.length? mosaicRegions.length - 1: -1;
 renderMosaicCanvas();
 }
 function closeMosaicEditor() {
-document.getElementById('mosaic-modal').classList.remove('active');
+const mm = document.getElementById('mosaic-modal');
+if (mm && mm.classList.contains('active')) {
+mm.classList.add('closing');
+setTimeout(function() { mm.classList.remove('active'); mm.classList.remove('closing'); }, 150);
+}
 mosaicFile = null;
 mosaicImg = null;
 mosaicRegions = [];
@@ -2237,6 +2351,8 @@ restoreImage(msgId);
 }
 function handleImageExpire(imgEl, msgId, thumbBase64) {
 imgEl.style.display = 'none';
+const remainFill = document.getElementById('remain-' + msgId);
+if (remainFill && remainFill.parentNode) remainFill.parentNode.remove();
 imgEl.dataset.expired = '1';
 const meta = messageMeta[msgId];
 if (meta) meta.expired = true;
@@ -2320,14 +2436,26 @@ scheduleStripUpdate();
 function startImageExpireTimer(imgEl, msgId, thumbBase64, displaySec, postedAt, isHistory) {
 if (!imgEl || displaySec <= 0) return;
 clearImageExpireTimer(msgId);
+/* Ver.2.3.40: 残り時間バーを表示タイマーと同期させる (見え始めてから減る) */
+const remainFillEl = document.getElementById('remain-' + msgId);
+const setRemainBar = function(delayMs) {
+if (!remainFillEl) return;
+const total = displaySec * 1000;
+const frac = Math.max(0, Math.min(1, delayMs / total));
+remainFillEl.style.transition = 'none';
+remainFillEl.style.width = (frac * 100) + '%';
+void remainFillEl.offsetWidth;
+remainFillEl.style.transition = 'width ' + Math.max(0, delayMs) + 'ms linear';
+remainFillEl.style.width = '0%';
+};
 const runExpire = function(delayMs) {
 imageExpireTimers[msgId] = setTimeout(function() {
 delete imageExpireTimers[msgId];
 if (imgEl && imgEl.parentNode && imgEl.dataset.expired!== '1') handleImageExpire(imgEl, msgId, thumbBase64);
 }, Math.max(0, delayMs));
 };
-if (isHistory) { runExpire(displaySec * 1000 - (Date.now() - (postedAt || Date.now()))); return;}
-const startFromVisible = function() { runExpire(displaySec * 1000);};
+if (isHistory) { const remainMs = displaySec * 1000 - (Date.now() - (postedAt || Date.now())); runExpire(remainMs); setRemainBar(remainMs); return;}
+const startFromVisible = function() { runExpire(displaySec * 1000); setRemainBar(displaySec * 1000);};
 const rect = imgEl.getBoundingClientRect();
 if (rect.top < window.innerHeight && rect.bottom > 0) { startFromVisible(); return;}
 if (!('IntersectionObserver' in window)) { startFromVisible(); return;}
@@ -2469,7 +2597,7 @@ html += '<span class="img-wrap"><img src="' + msg.thumb + '" class="chat-img-pos
 html += '<div class="poster-only-note">粗サムネのみ表示</div>';
 } else if (msg.image) {
 /* Ver.2.3.3: インラインは中サムネ (無ければ原画)。原画はタップ時の viewer だけが読む */
-html += '<span class="img-wrap"><img src="' + ((msg.mosaic && msg.mosaicOff)? (msg.mosaicRect || msg.image): (msg.thumbMid || msg.mosaic || msg.image)) + '" class="chat-img" id="img-' + msg.id + '" oncontextmenu="return false;">' + (originalDisplaySec > 0? '<span class="img-badge">⏱ ' + formatSecondsLabel(originalDisplaySec) + '表示</span>': '') + '</span>';
+html += '<span class="img-wrap"><img src="' + ((msg.mosaic && msg.mosaicOff)? (msg.mosaicRect || msg.image): (msg.thumbMid || msg.mosaic || msg.image)) + '" class="chat-img" id="img-' + msg.id + '" oncontextmenu="return false;">' + (originalDisplaySec > 0? '<span class="img-badge">⏱ ' + formatSecondsLabel(originalDisplaySec) + '表示</span>': '') + (displaySec > 0? '<span class="img-remain"><span class="img-remain-fill" id="remain-' + msg.id + '"></span></span>': '') + '</span>';
 } else if (msg.thumb) {
 html += '<span class="img-wrap"><img src="' + msg.thumb + '" class="chat-img-poster-thumb" style="cursor:default;" oncontextmenu="return false;">' + (originalDisplaySec > 0? '<span class="img-badge">⏱ ' + formatSecondsLabel(originalDisplaySec) + '表示</span>': '') + '</span>';
 html += '<div class="poster-only-note">粗サムネのみ表示</div>';
@@ -2572,7 +2700,10 @@ event.stopPropagation();
 const shown = Date.now() - imageModalOpenedAt;
 if (shown < 1000 &&!force) { setTimeout(function() { closeImageModal(null, true);}, 1000 - shown); return;}
 const modal = document.getElementById('image-modal');
-if (modal) modal.classList.remove('active');
+if (modal && modal.classList.contains('active')) {
+modal.classList.add('closing');
+setTimeout(function() { modal.classList.remove('active'); modal.classList.remove('closing'); }, 150);
+}
 if (imageModalTimer) { clearTimeout(imageModalTimer); imageModalTimer = null;}
 }
 document.addEventListener('contextmenu', function(e) {
