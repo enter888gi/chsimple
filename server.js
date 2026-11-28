@@ -472,7 +472,6 @@ flex-shrink: 0;
 .mosaic-mode-row { display: flex; gap: 8px;}
 .mosaic-mode-btn { flex: 1; background: #334155; color: #f8fafc; border: 1px solid #475569; padding: 7px 0; border-radius: var(--radius-m); cursor: pointer; font-size: 0.85rem; margin: 0; width: auto;}
 .mosaic-mode-btn.active { background: #38bdf8; color: #082f49; border-color: #38bdf8; font-weight: 700;}
-.chat-top-row { display: flex; justify-content: flex-start; padding: 4px 2px 0;}
 .img-help-btn { background: #334155; color: #e2e8f0; border: 1px solid #475569; padding: 8px 14px; border-radius: var(--radius-l); cursor: pointer; font-size: 0.75rem; line-height: 1.3; width: auto; margin: 0; min-height: 36px;}
 #img-help-modal { position: fixed; inset: 0; background: rgba(10, 10, 14, 0.85); z-index: 450; display: none; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box;}
 .img-help-card { position: relative; background: #1e293b; color: #f1f5f9; border-radius: var(--radius-l); padding: 20px 18px; max-width: 520px; width: 100%; max-height: 85vh; overflow-y: auto; box-sizing: border-box;}
@@ -588,7 +587,7 @@ button:active:not(:disabled):not(.post-mode-btn) { transform: scale(0.96);}
 </div>
 <div class="mosaic-btn-row">
 <button type="button" class="mosaic-sub-btn" onclick="resetMosaicEditor()">やり直し</button>
-<button type="button" class="mosaic-ok-btn" onclick="confirmMosaicPost()">投稿</button>
+<button type="button" class="mosaic-ok-btn" onclick="confirmMosaicPost(event)">投稿</button>
 </div>
 </div>
 </div>
@@ -630,7 +629,8 @@ button:active:not(:disabled):not(.post-mode-btn) { transform: scale(0.96);}
 <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
 <span class="room-name" id="header-room-name">SimpleChatee</span>
 <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.41</span>
+<button type="button" class="img-help-btn" id="img-help-btn" onclick="openImageHelp()">画像投稿の使い方</button>
+<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.45</span>
 </div>
 <div class="header-members" id="header-room-id-container" style="display:none;">
 <div class="member-block">
@@ -724,7 +724,6 @@ button:active:not(:disabled):not(.post-mode-btn) { transform: scale(0.96);}
 </div>
 <div id="view-chat" class="view">
 <div id="drop-overlay"><div class="drop-overlay-inner">📷<br>離して投稿</div></div>
-<div class="chat-top-row"><button type="button" class="img-help-btn" id="img-help-btn" onclick="openImageHelp()">画像投稿の使い方</button></div>
 <div id="recent-strip"></div>
 <div id="pull-indicator" class="pull-indicator"><span class="spinner"></span></div>
 <div id="chat-messages"></div>
@@ -764,7 +763,7 @@ button:active:not(:disabled):not(.post-mode-btn) { transform: scale(0.96);}
 <textarea id="msg-input" placeholder="メッセージを入力..." oninput="handleTyping()" onkeydown="onKeyDown(event)"></textarea>
 <button type="button" onclick="sendMessage()">送<br>信</button>
 </div>
-<div class="security-disclaimer">🌀モザイク投稿は場所と強さを選んで投稿可能です<br>📸通常投稿は指定時間が経過で自動モザイクが入ります<br>🔒 チャット内容はE2E暗号化で管理者も閲覧不可です<br>🔒画像は表示時間経過後にサーバーからも削除されます</div>
+<div class="security-disclaimer">🌀モザイク投稿は場所と強さを選んで投稿可能です<br>🔒 チャット内容はE2E暗号化で管理者も閲覧不可です<br>🔒画像は表示時間経過後にサーバーからも削除されます</div>
 </div>
 </div>
 </div>
@@ -1255,13 +1254,42 @@ pendingResetMine = false;
 showSoftToast('サーバーがリセットされました');
 goHome(true);
 });
+/* Ver.2.3.45: ピークモード。投稿後 10秒/30秒/1分/以降1分毎 の各タイミングで
+   3秒間だけ丸モザイクが外れる (四角は外れない)。実効表示は手動切替と OR で決まる */
+function peekRevealActive(meta) {
+if (!meta || !meta.peekMode || meta.expired) return false;
+const e = (Date.now() - (meta.postedAt || Date.now())) / 1000;
+if (e < 0 || e >= 3600) return false;
+if (e >= 10 && e < 13) return true;
+if (e >= 30 && e < 33) return true;
+if (e >= 60 && (e % 60) < 3) return true;
+return false;
+}
+function mosaicEffectivelyOff(meta) { return !!(meta.mosaicOff || peekRevealActive(meta)); }
+function applyMosaicDisplay(msgId) {
+const meta = messageMeta[msgId];
+if (!meta || meta.expired) return;
+meta._dispOff = mosaicEffectivelyOff(meta);
+const imgEl = document.getElementById('img-' + msgId);
+if (imgEl) imgEl.src = meta._dispOff? (meta.mosaicRect || meta.image): (meta.thumbMid || meta.mosaic || meta.image);
+}
+setInterval(function() {
+let changed = false;
+Object.keys(messageMeta).forEach(function(id) {
+const meta = messageMeta[id];
+if (!meta || !meta.peekMode || meta.expired) return;
+const eff = mosaicEffectivelyOff(meta);
+if (meta._dispOff === undefined) { meta._dispOff = eff; return; }
+if (eff !== meta._dispOff) { applyMosaicDisplay(id); changed = true; }
+});
+if (changed) scheduleStripUpdate();
+}, 500);
 socket.on('mosaic_toggled', function(data) {
 if (!data) return;
 const meta = messageMeta[data.messageId];
 if (!meta) return;
 meta.mosaicOff = !!data.mosaicOff;
-const imgEl = document.getElementById('img-' + data.messageId);
-if (imgEl && !meta.expired) imgEl.src = meta.mosaicOff? (meta.mosaicRect || meta.image): (meta.thumbMid || meta.mosaic || meta.image);
+applyMosaicDisplay(data.messageId);
 scheduleStripUpdate();
 });
 socket.on('display_typing', function(data) {
@@ -2138,8 +2166,9 @@ function clampMosaicRegion(region) {
 const canvas = document.getElementById('mosaic-canvas');
 if (!canvas || !region) return;
 if (region.shape === 'circle') {
-if (region.r * 2 <= canvas.width) region.cx = Math.max(region.r, Math.min(canvas.width - region.r, region.cx)); else region.cx = canvas.width / 2;
-if (region.r * 2 <= canvas.height) region.cy = Math.max(region.r, Math.min(canvas.height - region.r, region.cy)); else region.cy = canvas.height / 2;
+/* Ver.2.3.44: 中心が画面端まで移動でき、円の半分まで画面外にはみ出せる */
+region.cx = Math.max(0, Math.min(canvas.width, region.cx));
+region.cy = Math.max(0, Math.min(canvas.height, region.cy));
 } else {
 region.w = Math.max(24, Math.min(canvas.width, region.w));
 region.h = Math.max(24, Math.min(canvas.height, region.h));
@@ -2228,8 +2257,10 @@ out.width = src.width; out.height = src.height;
 drawMosaicVariant(out.getContext('2d'), filter);
 return out;
 }
-async function confirmMosaicPost() {
+async function confirmMosaicPost(event) {
 if (!mosaicFile || !currentKey) return;
+/* Ver.2.3.45: Shift+投稿でピークモード (PC限定) */
+const peek = !!(event && event.shiftKey);
 const file = mosaicFile;
 stopTyping();
 noteActivity();
@@ -2242,7 +2273,7 @@ const rectCanvas = (hasCircles && hasRects)? buildMosaicVariantCanvas('rect'): n
 let thumbBase64 = null;
 try { thumbBase64 = mosaicCanvasThumbDataUrl(allCanvas); } catch (e) {}
 closeMosaicEditor();
-if (displaySeconds === 0) {
+if (displaySeconds === 0 && !peek) {
 socket.emit('send_message', { msgId: Math.random().toString(36).substring(2, 10), roomId: currentRoomId, text: '', image: null, thumbMid: null, thumb: thumbBase64, displaySeconds: 0 });
 return;
 }
@@ -2268,7 +2299,7 @@ const midBlob = await canvasToJpegBlob(mc, 0.7);
 if (midBlob) thumbMidUrl = await uploadImageBlob(midBlob, 'thumb.jpg');
 }
 } catch (e) {}
-socket.emit('send_message', { msgId: Math.random().toString(36).substring(2, 10), roomId: currentRoomId, text: '', image: imageUrl, thumbMid: thumbMidUrl, thumb: thumbBase64, mosaic: mosaicUrl, mosaicRect: mosaicRectUrl, mosaicCircles: hasCircles, displaySeconds: displaySeconds });
+socket.emit('send_message', { msgId: Math.random().toString(36).substring(2, 10), roomId: currentRoomId, text: '', image: imageUrl, thumbMid: thumbMidUrl, thumb: thumbBase64, mosaic: mosaicUrl, mosaicRect: mosaicRectUrl, mosaicCircles: hasCircles, displaySeconds: displaySeconds, peek: peek });
 } catch (e) { showSoftToast('画像のアップロードに失敗しました'); }
 }
 function onFileSelected(input) {
@@ -2523,7 +2554,7 @@ return 5;
 function stripSrcFor(meta) {
 if (!meta) return null;
 if (meta.thumbOnly || meta.expired) return meta.thumb || null;
-if (meta.mosaic && meta.mosaicOff) return meta.mosaicRect || meta.image || meta.thumb || null;
+if (meta.mosaic && mosaicEffectivelyOff(meta)) return meta.mosaicRect || meta.image || meta.thumb || null;
 return meta.thumbMid || meta.mosaic || meta.image || meta.thumb || null;
 }
 function makeStripItem(msgId, src) {
@@ -2616,7 +2647,7 @@ const displaySec = (typeof msg.displaySeconds === 'number')? msg.displaySeconds:
 const originalDisplaySec = (typeof msg.originalDisplaySeconds === 'number')? msg.originalDisplaySeconds: displaySec;
 const postedAt = msg.postedAt || Date.now();
 if (msg.image || msg.thumb) {
-messageMeta[msg.id] = { image: msg.image || null, thumbMid: msg.thumbMid || null, thumb: msg.thumb || null, mosaic: msg.mosaic || null, mosaicRect: msg.mosaicRect || null, mosaicCircles: !!msg.mosaicCircles, mosaicOff: !!msg.mosaicOff, displaySeconds: displaySec, postedAt: postedAt, senderSessionId: msg.sessionId || null, originalDisplaySeconds: originalDisplaySec, thumbOnly: displaySec === 0 ||!msg.image, expired: false};
+messageMeta[msg.id] = { image: msg.image || null, thumbMid: msg.thumbMid || null, thumb: msg.thumb || null, mosaic: msg.mosaic || null, mosaicRect: msg.mosaicRect || null, mosaicCircles: !!msg.mosaicCircles, mosaicOff: !!msg.mosaicOff, peekMode: !!msg.peekMode, displaySeconds: displaySec, postedAt: postedAt, senderSessionId: msg.sessionId || null, originalDisplaySeconds: originalDisplaySec, thumbOnly: displaySec === 0 ||!msg.image, expired: false};
 }
 let html = '';
 const date = new Date(postedAt);
@@ -2630,9 +2661,9 @@ html += '<span class="img-wrap"><img src="' + msg.thumb + '" class="chat-img-pos
 html += '<div class="poster-only-note">粗サムネのみ表示</div>';
 } else if (msg.image) {
 /* Ver.2.3.3: インラインは中サムネ (無ければ原画)。原画はタップ時の viewer だけが読む */
-html += '<span class="img-wrap"><img src="' + ((msg.mosaic && msg.mosaicOff)? (msg.mosaicRect || msg.image): (msg.thumbMid || msg.mosaic || msg.image)) + '" class="chat-img" id="img-' + msg.id + '" oncontextmenu="return false;">' + (originalDisplaySec > 0? '<span class="img-badge">⏱ ' + formatSecondsLabel(originalDisplaySec) + '表示</span>': '') + (displaySec > 0? '<span class="img-remain"><span class="img-remain-fill" id="remain-' + msg.id + '"></span></span>': '') + '</span>';
+html += '<span class="img-wrap"><img src="' + ((msg.mosaic && (msg.mosaicOff || peekRevealActive(messageMeta[msg.id])))? (msg.mosaicRect || msg.image): (msg.thumbMid || msg.mosaic || msg.image)) + '" class="chat-img" id="img-' + msg.id + '" oncontextmenu="return false;">' + ((originalDisplaySec > 0 || msg.peekMode)? '<span class="img-badge">⏱ ' + formatSecondsLabel(originalDisplaySec) + '表示</span>': '') + (displaySec > 0? '<span class="img-remain"><span class="img-remain-fill" id="remain-' + msg.id + '"></span></span>': '') + '</span>';
 } else if (msg.thumb) {
-html += '<span class="img-wrap"><img src="' + msg.thumb + '" class="chat-img-poster-thumb" style="cursor:default;" oncontextmenu="return false;">' + (originalDisplaySec > 0? '<span class="img-badge">⏱ ' + formatSecondsLabel(originalDisplaySec) + '表示</span>': '') + '</span>';
+html += '<span class="img-wrap"><img src="' + msg.thumb + '" class="chat-img-poster-thumb" style="cursor:default;" oncontextmenu="return false;">' + ((originalDisplaySec > 0 || msg.peekMode)? '<span class="img-badge">⏱ ' + formatSecondsLabel(originalDisplaySec) + '表示</span>': '') + '</span>';
 html += '<div class="poster-only-note">粗サムネのみ表示</div>';
 }
 
@@ -2672,7 +2703,7 @@ div.innerText = text;
 container.appendChild(div);
 container.scrollTop = container.scrollHeight;
 }
-function viewSrcFor(meta) { return meta.mosaic? (meta.mosaicOff? (meta.mosaicRect || meta.image): meta.mosaic): meta.image; }
+function viewSrcFor(meta) { return meta.mosaic? (mosaicEffectivelyOff(meta)? (meta.mosaicRect || meta.image): meta.mosaic): meta.image; }
 let imageModalTimer = null;
 let imageModalOpenedAt = 0;
 function showSoftToast(text) {
@@ -3192,7 +3223,7 @@ socket.on('typing_stop', ({ roomId}) => {
 socket.to(roomId || socket.data.roomId).emit('display_typing', { isTyping: false});
 });
 
-socket.on('send_message', ({ msgId, roomId, text, image, thumb, thumbMid, displaySeconds, mosaic, mosaicRect, mosaicCircles}) => {
+socket.on('send_message', ({ msgId, roomId, text, image, thumb, thumbMid, displaySeconds, mosaic, mosaicRect, mosaicCircles, peek}) => {
 const targetId = roomId || socket.data.roomId;
 const room = rooms[targetId];
 if (!room) return;
@@ -3225,7 +3256,7 @@ effMosaicRect = null;
 const messageData = {
 type: 'user', id: msgId || Math.random().toString(36).substring(2, 10), sessionId: sessionId,
 senderName: sender? sender.nickname: '匿名', colorIndex: sender? sender.colorIndex: 0,
-text, image: effImage, thumbMid: effThumbMid, thumb: effThumb, mosaic: effMosaic, mosaicRect: effMosaicRect, mosaicCircles: !!mosaicCircles && !!effMosaic, mosaicOff: false, displaySeconds: ds, originalDisplaySeconds: ds, postedAt: Date.now()
+text, image: effImage, thumbMid: effThumbMid, thumb: effThumb, mosaic: effMosaic, mosaicRect: effMosaicRect, mosaicCircles: !!mosaicCircles && !!effMosaic, mosaicOff: false, peekMode: !!peek && !!effMosaic, displaySeconds: (!!peek && !!effMosaic)? 3600: ds, originalDisplaySeconds: ds, postedAt: Date.now()
 };
 if (effImage) scheduleImageDelete(effImage, ds);
 if (effThumbMid) scheduleImageDelete(effThumbMid, ds);
