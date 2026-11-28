@@ -335,9 +335,10 @@ body { background-color: var(--bg-color); color: var(--text-color); margin: 0; p
 #qr-url { color: #64748b; font-size: 0.58rem; word-break: break-all; margin-top: 2px; line-height: 1.3;}
 .header-members { display: flex; align-items: flex-start; gap: 6px; min-width: 0;}
 .member-block { flex: 1; min-width: 0;}
-.member-chip { background: #334155; color: #e2e8f0; border: none; border-radius: 999px; padding: 6px 12px; font-size: 0.75rem; line-height: 1.25; cursor: pointer; width: auto; margin: 0; min-height: 32px; display: inline-flex; align-items: center;}
-.btn-action-group { display: flex; gap: 4px; flex-shrink: 0; align-items: stretch;}
-.btn-leave,.btn-host-action { width: 46px; min-width: 46px; min-height: 40px; margin: 0; padding: 6px 2px; border: none; border-radius: var(--radius-s); color: white; font-size: 0.68rem; font-weight: bold; line-height: 1.15; cursor: pointer; text-align: center;}
+.member-chip { background: #334155; color: #e2e8f0; border: none; border-radius: 999px; padding: 6px 12px; font-size: 0.75rem; line-height: 1.25; cursor: pointer; width: auto; max-width: 100%; margin: 0; min-height: 32px; display: inline-flex; align-items: center;}
+.member-chip-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;}
+.btn-action-group { display: flex; gap: 2px; flex-shrink: 0; align-items: stretch; margin-left: auto;}
+.btn-leave,.btn-host-action { width: 40px; min-width: 40px; min-height: 36px; margin: 0; padding: 6px 2px; border: none; border-radius: var(--radius-s); color: white; font-size: 0.68rem; font-weight: bold; line-height: 1.15; cursor: pointer; text-align: center;}
 .btn-leave { background: #64748b; display: inline-flex; align-items: center; justify-content: center;}
 .btn-host-action { background: #ef4444; display: none; align-items: center; justify-content: center;}
 .btn-kick { background: #f59e0b; color: #111827;}
@@ -499,16 +500,18 @@ flex-shrink: 0;
 .display-time-row select { width: auto; padding: 2px 6px; margin: 0; font-size: 0.8rem; border-radius: var(--radius-m);}
 .dt-label { text-align: center; line-height: 1.35;}
 .input-row { display: flex; gap: 8px; align-items: flex-end;}
-.file-btn { background: #475569; color: white; padding: 12px 10px; border-radius: var(--radius-m); cursor: pointer; font-size: 0.9rem; margin: 0; width: auto; min-width: 46px; height: 46px; display: flex; align-items: center; justify-content: center; gap: 4px; flex-shrink: 0;}
+.file-btn { background: #475569; color: white; padding: 0; border-radius: var(--radius-m); cursor: pointer; font-size: 0.9rem; margin: 0; width: 76px; height: 46px; display: flex; align-items: center; flex-shrink: 0; position: relative;}
+.file-btn-icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); width: 24px; text-align: center; font-size: 0.95rem; line-height: 1; pointer-events: none;}
 .post-mode-toggle { position: relative; display: flex; background: #1e293b; border: 1px solid #475569; border-radius: var(--radius-l); padding: 2px; flex: 1; margin-left: auto; max-width: 46%;}
 .post-mode-knob { position: absolute; top: 2px; left: 2px; width: calc(50% - 2px); height: calc(100% - 4px); background: #38bdf8; border-radius: 12px; transition: transform 0.18s cubic-bezier(0.2, 0, 0, 1);}
 .post-mode-toggle.mosaic .post-mode-knob { transform: translateX(100%);}
 .post-mode-btn { position: relative; z-index: 1; flex: 1; background: transparent; color: #94a3b8; border: none; padding: 4px 0; border-radius: 12px; cursor: pointer; font-size: 0.68rem; line-height: 1.35; width: auto; margin: 0; text-align: center;}
 .post-mode-btn.active { background: transparent; color: #082f49; font-weight: 700;}
-#file-pick-btn { border: none;}
+/* Ver.2.3.41: .input-row button の width:52px より優先して、モードで変わらない固定幅にする */
+#file-pick-btn { border: none; width: 76px;}
 .input-row textarea { margin: 0; min-height: 46px;}
 .input-row button { margin: 0; width: 52px; height: 46px; padding: 0; flex-shrink: 0; line-height: 1.15;}
-.security-disclaimer { font-size: 0.92rem; color: var(--text-muted); line-height: 1.45; margin-top: 2px; padding: 0 2px;}
+.security-disclaimer { font-size: 0.8rem; color: var(--text-muted); line-height: 1.45; margin-top: 2px; padding: 0 2px;}
 #full-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(4px); z-index: 9999; display: none; justify-content: center; align-items: center;}
 .toast-message { background: #ef4444; color: white; padding: 14px 28px; border-radius: var(--radius-l); font-weight: bold; font-size: 1rem; text-align: center;}
 .modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.75); z-index: 10000; display: none; justify-content: center; align-items: center;}
@@ -550,12 +553,20 @@ button:active:not(:disabled):not(.post-mode-btn) { transform: scale(0.96);}
 .img-help-card, .modal-member-list, #mosaic-modal, .view, #home-room-list { overscroll-behavior: contain;}
 .chat-img { outline: 1px solid oklch(1 0 0 / 0.1); outline-offset: -1px;}
 #image-modal-img { outline: 1px solid oklch(1 0 0 / 0.1); outline-offset: -1px;}
-.file-btn-label { font-size: 0.68rem; line-height: 1; white-space: nowrap;}
+.file-btn-label { position: absolute; left: 39px; top: 50%; transform: translateY(-50%); width: 32px; text-align: left; font-size: 0.68rem; line-height: 1.25; white-space: normal; pointer-events: none;}
 .img-remain { display: block; height: 3px; background: rgba(255,255,255,0.18); border-radius: 999px; margin-top: 4px; overflow: hidden;}
 .img-remain-fill { display: block; height: 100%; width: 100%; background: var(--accent-color); border-radius: 999px;}
 #drop-overlay { position: absolute; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; background: rgba(2, 132, 199, 0.25); pointer-events: none;}
 #drop-overlay.show { display: flex;}
 .drop-overlay-inner { border: 2px dashed var(--accent-color); border-radius: var(--radius-l); background: rgba(15, 23, 42, 0.88); color: var(--text-color); font-size: 1.05rem; font-weight: bold; text-align: center; padding: 28px 36px; line-height: 1.6;}
+/* Ver.2.3.41: PC幅レイアウト (900px以上でのみ柱を広げる。スマホ幅の見た目は現行のまま) */
+@media (min-width: 900px) {
+.container { max-width: 900px;}
+#chat-messages { padding-left: 20px; padding-right: 20px;}
+.message { max-width: 70%;}
+.chat-img { max-height: 300px;}
+.chat-img-poster-thumb { height: 300px;}
+}
 </style>
 </head>
 <body>
@@ -619,11 +630,11 @@ button:active:not(:disabled):not(.post-mode-btn) { transform: scale(0.96);}
 <button type="button" class="home-btn" onclick="goHome()" aria-label="トップへ">🏠</button>
 <span class="room-name" id="header-room-name">SimpleChatee</span>
 <button type="button" class="header-copy-btn" id="header-copy-btn" onclick="copyRoomLink()" style="display:none;">🔗コピー</button>
-<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.40</span>
+<span class="version-tag" id="version-tag" onclick="toggleRoomQr()">Ver. 2.3.41</span>
 </div>
 <div class="header-members" id="header-room-id-container" style="display:none;">
 <div class="member-block">
-<button type="button" class="member-chip" id="member-count" onclick="openMembersModal()"></button>
+<button type="button" class="member-chip" id="member-count" onclick="openMembersModal()"><span class="member-chip-text" id="member-count-text"></span></button>
 </div>
 <div class="btn-action-group" id="room-action-container">
 <button type="button" id="btn-delete-room" class="btn-host-action" onclick="deleteRoom()">部屋<br>削除</button>
@@ -747,7 +758,7 @@ button:active:not(:disabled):not(.post-mode-btn) { transform: scale(0.96);}
 <div class="post-mode-toggle" id="post-mode-toggle"><span class="post-mode-knob"></span><button type="button" class="post-mode-btn active" id="post-mode-photo" onclick="setPostMode('photo')">写真<br>投稿</button><button type="button" class="post-mode-btn" id="post-mode-mosaic" onclick="setPostMode('mosaic')">モザイク<br>投稿</button></div>
 </div>
 <div class="input-row">
-<button type="button" class="file-btn" id="file-pick-btn" onclick="pickImageFile()">📷<span class="file-btn-label" id="file-mode-label">写真</span></button>
+<button type="button" class="file-btn" id="file-pick-btn" onclick="pickImageFile()"><span class="file-btn-icon" aria-hidden="true">📷</span><span class="file-btn-label" id="file-mode-label">写真</span></button>
 <input type="file" id="file-input" accept="image/*" style="display:none;" onchange="onFileSelected(this)">
 <input type="file" id="mosaic-file-input" accept="image/*" style="display:none;" onchange="onMosaicFileSelected(this)">
 <textarea id="msg-input" placeholder="メッセージを入力..." oninput="handleTyping()" onkeydown="onKeyDown(event)"></textarea>
@@ -804,7 +815,8 @@ if (mb) mb.classList.toggle('active', postMode === 'mosaic');
 const tg = document.getElementById('post-mode-toggle');
 if (tg) tg.classList.toggle('mosaic', postMode === 'mosaic');
 const fl = document.getElementById('file-mode-label');
-if (fl) fl.textContent = (postMode === 'mosaic')? 'モザイク': '写真';
+/* Ver.2.3.41: モザイク時は「モザ／イク」の2行表示 (アイコンは絶対配置で固定され、ラベル変化では動かない) */
+if (fl) fl.innerHTML = (postMode === 'mosaic')? 'モザ<br>イク': '写真';
 }
 /* Ver.2.3.40: PC (精密ポインタ) でのみ、入力欄にドロップ/貼り付け投稿のヒントを出す */
 function updateMsgPlaceholder() {
@@ -823,6 +835,9 @@ let keepAliveTimer = null;
 let lastChatActivityAt = Date.now();
 let pendingKickSessionId = null;
 let currentMemberNames = [];
+/* Ver.2.3.41: 入室中チップ表示用の人数キャッシュ */
+let currentMemberCount = 0;
+let currentMemberMax = 3;
 let pendingKickNickname = null;
 let typingTimeout = null;
 let isTyping = false;
@@ -863,9 +878,25 @@ el.textContent = truncateLabel(full, 14);
 el.title = full;
 }
 /* Ver.2.3.40: メンバー名はヘッダーに並べず保持だけし、チップのタップで閲覧専用モーダルに出す */
+/* Ver.2.3.41: チップには名前も出す (各名前は最大5文字まで)。フルネームはモーダル側で見る */
+function truncateChipName(name) {
+return [...String(name == null? '': name)].slice(0, 5).join('');
+}
+function renderMemberChip() {
+const textEl = document.getElementById('member-count-text');
+const chipEl = document.getElementById('member-count');
+if (!textEl && !chipEl) return;
+const names = currentMemberNames.map(truncateChipName).filter(function(n) { return n.length > 0; });
+let text = '入室中：';
+if (names.length) text += names.join(' ') + ' ';
+text += currentMemberCount + '/' + currentMemberMax + '人';
+if (textEl) textEl.textContent = text;
+else chipEl.innerText = text;
+}
 function renderMemberNames(names) {
 currentMemberNames = Array.isArray(names)? names.slice(): [];
 renderMembersList();
+renderMemberChip();
 }
 function renderMembersList() {
 const el = document.getElementById('members-list');
@@ -1533,7 +1564,9 @@ window.location.hash = '';
 setRoomTitle('SimpleChatee');
 document.getElementById('header-copy-btn').style.display = 'none';
 document.getElementById('header-room-id-container').style.display = 'none';
-document.getElementById('member-count').innerText = '';
+const mcTextEl = document.getElementById('member-count-text');
+if (mcTextEl) mcTextEl.textContent = '';
+currentMemberCount = 0;
 currentMemberNames = [];
 updateMsgPlaceholder();
 document.getElementById('btn-delete-room').style.display = 'none';
@@ -1545,10 +1578,10 @@ showView('view-home');
 function updateMemberCount(count, maxMembers, members) {
 const el = document.getElementById('member-count');
 if (!el) return;
-const safeCount = Math.max(0, Number(count) || 0);
-const max = maxMembers || currentMaxMembers || 3;
-el.innerText = '入室中:' + safeCount + '/' + max + '人';
+currentMemberCount = Math.max(0, Number(count) || 0);
+currentMemberMax = maxMembers || currentMaxMembers || 3;
 if (Array.isArray(members)) renderMemberNames(members);
+renderMemberChip();
 }
 
 function createRoom() {
